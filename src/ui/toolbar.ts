@@ -1,0 +1,789 @@
+import {
+  COLOR_SCHEME_LABELS,
+  MAIN_FEATURE_ORDER,
+  REGION_LABELS,
+  REGION_TYPES,
+} from "../core/constants";
+import type { ResolvedAccessibilityToolConfig } from "../core/config";
+import { isHTMLElement } from "../core/dom";
+import type {
+  AccessibilityToolState,
+  FeatureId,
+  RegionType,
+} from "../types";
+
+export type ToolbarAction = FeatureId | `region:${RegionType}` | "screenSound";
+
+interface ToolbarCallbacks {
+  onAction: (action: ToolbarAction, control: HTMLElement) => void;
+  onRateChange: (rate: number, control: HTMLElement) => void;
+  onCollapsedChange: (collapsed: boolean) => void;
+}
+
+const FEATURE_LABELS: Readonly<Record<FeatureId, string>> = {
+  reading: "朗读",
+  speechRate: "语速",
+  colorScheme: "配色",
+  zoomIn: "放大",
+  zoomOut: "缩小",
+  largeCursor: "大鼠标",
+  crosshair: "十字线",
+  fullscreen: "大界面",
+  pin: "固定",
+  reset: "重置",
+  help: "帮助",
+  readScreen: "读屏专用",
+  exit: "退出",
+};
+
+const ICONS: Readonly<Record<string, string>> = {
+  reading:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4Zm12.2-.8a5.5 5.5 0 0 1 0 7.6M18.8 5.6a9 9 0 0 1 0 12.8"/></svg>',
+  speechRate:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17a8 8 0 1 1 16 0M12 17l4-5M7 17h10"/></svg>',
+  colorScheme:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18V3Z"/><path d="M12 7h6M12 12h9M12 17h6"/></svg>',
+  zoomIn:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5M10.5 7.5v6M7.5 10.5h6"/></svg>',
+  zoomOut:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5M7.5 10.5h6"/></svg>',
+  largeCursor:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 3 13 10-7 1-3 6L5 3Z"/><path d="m13 15 4 5"/></svg>',
+  crosshair:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/></svg>',
+  fullscreen:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>',
+  pin:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 3 8 8-2 2 3 3-1 1-4-2-5 5-1-1 5-5-2-4-2 2-1-1 2-2-2-2 2-2Z"/></svg>',
+  reset:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8V3m0 0h5M5 3l3.5 3.5A8 8 0 1 1 4 13"/></svg>',
+  help:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.7 9a2.4 2.4 0 1 1 3.4 2.2c-.8.4-1.1.9-1.1 1.8M12 17h.01"/></svg>',
+  readScreen:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v12H3zM8 21h8M12 17v4"/><path d="M7 9h10M7 13h6"/></svg>',
+  exit:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4H4v16h6M14 8l4 4-4 4M8 12h10"/></svg>',
+  viewport:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 9h18"/></svg>',
+  navigation:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h10M4 19h16"/><circle cx="18" cy="12" r="2"/></svg>',
+  interaction:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM7 9h6M7 13h10M7 16h4"/></svg>',
+  service:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 10a7 7 0 0 1 14 0v6M5 13H3v4h4v-7H5M19 13h2v4h-4v-7h2M17 19c-1 1-2.5 2-5 2"/></svg>',
+  list:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg>',
+  content:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h10l4 4v14H5zM15 3v5h5M8 12h8M8 16h8"/></svg>',
+  screenSound:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4Zm12.5 0a4 4 0 0 1 0 6"/></svg>',
+};
+
+const SWITCH_FEATURES = new Set<FeatureId>([
+  "reading",
+  "largeCursor",
+  "crosshair",
+  "fullscreen",
+  "pin",
+  "readScreen",
+]);
+
+export class ToolbarUI {
+  private readonly root: HTMLDivElement;
+  private readonly toolbar: HTMLDivElement;
+  private readonly mainGroup: HTMLDivElement;
+  private readonly screenGroup: HTMLDivElement;
+  private readonly ratePanel: HTMLDivElement;
+  private rateSlider!: HTMLInputElement;
+  private rateValue!: HTMLOutputElement;
+  private readonly liveRegion: HTMLDivElement;
+  private readonly revealButton: HTMLButtonElement;
+  private readonly horizontalLine: HTMLDivElement;
+  private readonly verticalLine: HTMLDivElement;
+  private readonly highlight: HTMLDivElement;
+  private readonly controls = new Map<ToolbarAction, HTMLElement>();
+  private regionCounts: Record<RegionType, number> = {
+    viewport: 0,
+    navigation: 0,
+    interaction: 0,
+    service: 0,
+    list: 0,
+    content: 0,
+  };
+  private state: AccessibilityToolState | null = null;
+  private config: ResolvedAccessibilityToolConfig;
+  private collapseTimer: number | null = null;
+  private ratePanelOpen = false;
+
+  constructor(
+    private readonly host: HTMLElement,
+    shadowRoot: ShadowRoot,
+    config: ResolvedAccessibilityToolConfig,
+    private readonly callbacks: ToolbarCallbacks,
+  ) {
+    this.config = config;
+    this.root = document.createElement("div");
+    this.root.setAttribute("data-a11y-tool-root", "");
+
+    this.toolbar = document.createElement("div");
+    this.toolbar.className = "a11y-toolbar";
+    this.toolbar.id = `${host.id}-toolbar`;
+    this.toolbar.role = "toolbar";
+    this.toolbar.setAttribute("aria-label", "无障碍工具栏");
+    this.toolbar.setAttribute("aria-orientation", "horizontal");
+
+    this.mainGroup = document.createElement("div");
+    this.mainGroup.className = "a11y-toolbar__items";
+    this.mainGroup.dataset.mode = "main";
+    this.mainGroup.role = "group";
+    this.mainGroup.setAttribute("aria-label", "主要功能");
+
+    this.screenGroup = document.createElement("div");
+    this.screenGroup.className = "a11y-toolbar__items";
+    this.screenGroup.dataset.mode = "screen";
+    this.screenGroup.role = "group";
+    this.screenGroup.setAttribute("aria-label", "读屏专用功能");
+    this.screenGroup.hidden = true;
+
+    this.buildMainControls();
+    this.buildScreenControls();
+    this.toolbar.append(this.mainGroup, this.screenGroup);
+
+    this.ratePanel = this.buildRatePanel();
+
+    this.revealButton = document.createElement("button");
+    this.revealButton.type = "button";
+    this.revealButton.className = "a11y-reveal";
+    this.revealButton.setAttribute("aria-label", "展开无障碍工具栏");
+    this.revealButton.innerHTML =
+      '<span aria-hidden="true">⌄</span><span>无障碍工具</span>';
+
+    this.liveRegion = document.createElement("div");
+    this.liveRegion.className = "a11y-visually-hidden";
+    this.liveRegion.setAttribute("role", "status");
+    this.liveRegion.setAttribute("aria-live", "polite");
+    this.liveRegion.setAttribute("aria-atomic", "true");
+
+    this.horizontalLine = this.createOverlay("a11y-crosshair a11y-crosshair--x");
+    this.verticalLine = this.createOverlay("a11y-crosshair a11y-crosshair--y");
+    this.highlight = this.createOverlay("a11y-highlight");
+
+    this.root.append(
+      this.toolbar,
+      this.ratePanel,
+      this.revealButton,
+      this.liveRegion,
+      this.horizontalLine,
+      this.verticalLine,
+      this.highlight,
+    );
+    shadowRoot.append(this.root);
+
+    this.bindEvents();
+    this.updateHelpLinks();
+  }
+
+  updateConfig(config: ResolvedAccessibilityToolConfig): void {
+    this.config = config;
+    this.updateHelpLinks();
+  }
+
+  show(): void {
+    this.host.hidden = false;
+    this.root.hidden = false;
+  }
+
+  hide(): void {
+    this.closeRatePanel(false);
+    this.cancelCollapse();
+    this.hideCrosshair();
+    this.hideHighlight();
+    this.root.hidden = true;
+    this.host.hidden = true;
+  }
+
+  destroy(): void {
+    this.cancelCollapse();
+    this.root.remove();
+  }
+
+  updateState(state: AccessibilityToolState): void {
+    this.state = state;
+    this.host.toggleAttribute("data-a11y-tool-pinned", state.isPinned);
+    this.host.toggleAttribute("data-a11y-tool-collapsed", state.isCollapsed);
+    this.host.toggleAttribute(
+      "data-a11y-tool-large-cursor",
+      state.largeCursor,
+    );
+    this.root.toggleAttribute("data-read-screen", state.isReadScreen);
+    this.mainGroup.hidden = state.isReadScreen;
+    this.screenGroup.hidden = !state.isReadScreen;
+
+    for (const feature of MAIN_FEATURE_ORDER) {
+      for (const control of this.findControls(feature)) {
+        if (SWITCH_FEATURES.has(feature)) {
+          control.setAttribute(
+            "aria-pressed",
+            String(this.getPressedState(feature, state)),
+          );
+        }
+        this.updateFeatureMeta(feature, control, state);
+      }
+    }
+
+    const sound = this.controls.get("screenSound");
+    sound?.setAttribute("aria-pressed", String(state.readingEnabled));
+    if (sound) {
+      sound.setAttribute(
+        "aria-label",
+        `声音开关，当前${state.readingEnabled ? "开启" : "关闭"}`,
+      );
+    }
+
+    this.rateSlider.value = String(state.speechRate);
+    this.rateValue.value = `${formatRate(state.speechRate)}×`;
+    this.updateAvailability();
+
+    if (!state.isPinned || state.isReadScreen) {
+      this.setCollapsed(false);
+    }
+  }
+
+  setRegionCounts(counts: Readonly<Record<RegionType, number>>): void {
+    this.regionCounts = { ...counts };
+    for (const type of REGION_TYPES) {
+      const control = this.controls.get(`region:${type}`);
+      if (!control) {
+        continue;
+      }
+      const count = counts[type];
+      const meta = control.querySelector<HTMLElement>("[data-control-meta]");
+      if (meta) {
+        meta.textContent = `(${count})`;
+      }
+      control.setAttribute("aria-label", `${REGION_LABELS[type]}，共 ${count} 个`);
+      control.setAttribute("aria-disabled", String(count === 0));
+      control.toggleAttribute("data-skip-toolbar-nav", count === 0);
+    }
+  }
+
+  setFeatureAvailability(feature: FeatureId, available: boolean, reason = ""): void {
+    for (const control of this.findControls(feature)) {
+      control.setAttribute("aria-disabled", String(!available));
+      if (reason) {
+        control.dataset.unavailableReason = reason;
+      } else {
+        delete control.dataset.unavailableReason;
+      }
+    }
+  }
+
+  getUnavailableReason(action: ToolbarAction): string | null {
+    const control = this.findVisibleControl(action);
+    return control?.getAttribute("aria-disabled") === "true"
+      ? control.dataset.unavailableReason || "当前功能不可用"
+      : null;
+  }
+
+  focusFirst(): void {
+    const items = this.getNavigableItems();
+    const first = items[0];
+    if (first) {
+      this.setRovingItem(first);
+      first.focus({ preventScroll: true });
+      first.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  }
+
+  focusAction(action: ToolbarAction): void {
+    const control = this.findVisibleControl(action);
+    if (control) {
+      this.setRovingItem(control);
+      control.focus({ preventScroll: true });
+      control.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  }
+
+  getControl(action: ToolbarAction): HTMLElement | null {
+    return this.findVisibleControl(action);
+  }
+
+  announce(message: string, assertive = false): void {
+    this.liveRegion.setAttribute("aria-live", assertive ? "assertive" : "polite");
+    this.liveRegion.textContent = "";
+    window.setTimeout(() => {
+      this.liveRegion.textContent = message;
+    }, 20);
+  }
+
+  toggleRatePanel(): void {
+    if (this.ratePanelOpen) {
+      this.closeRatePanel(true);
+    } else {
+      this.openRatePanel();
+    }
+  }
+
+  closeRatePanel(returnFocus: boolean): void {
+    if (!this.ratePanelOpen) {
+      return;
+    }
+    this.ratePanelOpen = false;
+    this.ratePanel.hidden = true;
+    const button = this.controls.get("speechRate");
+    button?.setAttribute("aria-expanded", "false");
+    if (returnFocus) {
+      this.focusAction("speechRate");
+    }
+    this.scheduleCollapse();
+  }
+
+  expandAndFocus(): void {
+    this.setCollapsed(false);
+    this.focusFirst();
+  }
+
+  setCollapsed(collapsed: boolean): void {
+    if (!this.state?.isPinned || this.state.isReadScreen || this.ratePanelOpen) {
+      collapsed = false;
+    }
+    const current = this.host.hasAttribute("data-a11y-tool-collapsed");
+    if (current === collapsed) {
+      return;
+    }
+    this.host.toggleAttribute("data-a11y-tool-collapsed", collapsed);
+    this.revealButton.tabIndex = collapsed ? 0 : -1;
+    this.callbacks.onCollapsedChange(collapsed);
+  }
+
+  scheduleCollapse(): void {
+    this.cancelCollapse();
+    if (
+      !this.state?.isPinned ||
+      this.state.isReadScreen ||
+      this.ratePanelOpen ||
+      this.root.matches(":hover") ||
+      this.root.contains(
+        (this.root.getRootNode() as Document | ShadowRoot).activeElement,
+      )
+    ) {
+      return;
+    }
+    this.collapseTimer = window.setTimeout(() => {
+      this.setCollapsed(true);
+    }, this.config.toolbar.pinHideDelayMs);
+  }
+
+  cancelCollapse(): void {
+    if (this.collapseTimer !== null) {
+      window.clearTimeout(this.collapseTimer);
+      this.collapseTimer = null;
+    }
+  }
+
+  positionHighlight(element: HTMLElement): void {
+    const rect = getGlobalRect(element);
+    if (rect.width <= 0 && rect.height <= 0) {
+      this.hideHighlight();
+      return;
+    }
+    this.highlight.style.setProperty("--a11y-highlight-x", `${rect.left}px`);
+    this.highlight.style.setProperty("--a11y-highlight-y", `${rect.top}px`);
+    this.highlight.style.setProperty("--a11y-highlight-width", `${rect.width}px`);
+    this.highlight.style.setProperty("--a11y-highlight-height", `${rect.height}px`);
+    this.highlight.hidden = false;
+  }
+
+  hideHighlight(): void {
+    this.highlight.hidden = true;
+  }
+
+  positionCrosshair(x: number, y: number): void {
+    this.horizontalLine.style.setProperty("--a11y-crosshair-y", `${y}px`);
+    this.verticalLine.style.setProperty("--a11y-crosshair-x", `${x}px`);
+    this.horizontalLine.hidden = false;
+    this.verticalLine.hidden = false;
+  }
+
+  hideCrosshair(): void {
+    this.horizontalLine.hidden = true;
+    this.verticalLine.hidden = true;
+  }
+
+  containsEvent(event: Event): boolean {
+    return event.composedPath().includes(this.root);
+  }
+
+  getToolbarHeight(): number {
+    const parsed = Number.parseFloat(
+      getComputedStyle(this.host).getPropertyValue("--a11y-toolbar-height"),
+    );
+    return Number.isFinite(parsed) ? parsed : 102;
+  }
+
+  private buildMainControls(): void {
+    for (const feature of MAIN_FEATURE_ORDER) {
+      if (!this.config.features[feature]) {
+        continue;
+      }
+      this.mainGroup.append(this.createControl(feature, FEATURE_LABELS[feature]));
+    }
+  }
+
+  private buildScreenControls(): void {
+    for (const type of REGION_TYPES) {
+      this.screenGroup.append(
+        this.createControl(`region:${type}`, REGION_LABELS[type], type),
+      );
+    }
+    if (this.config.features.readScreen) {
+      this.screenGroup.append(this.createControl("readScreen", "读屏专用"));
+    }
+    if (this.config.features.reading) {
+      this.screenGroup.append(this.createControl("screenSound", "声音开关"));
+    }
+    if (this.config.features.help) {
+      this.screenGroup.append(this.createControl("help", "帮助"));
+    }
+    if (this.config.features.exit) {
+      this.screenGroup.append(this.createControl("exit", "退出"));
+    }
+  }
+
+  private createControl(
+    action: ToolbarAction,
+    label: string,
+    icon: string = action,
+  ): HTMLElement {
+    const isHelp = action === "help";
+    const control = isHelp
+      ? document.createElement("a")
+      : document.createElement("button");
+    if (control instanceof HTMLButtonElement) {
+      control.type = "button";
+    } else {
+      control.target = "_blank";
+      control.rel = "noopener";
+    }
+    control.className = "a11y-control";
+    control.tabIndex = -1;
+    control.dataset.toolbarItem = "";
+    control.dataset.action = action;
+    control.setAttribute("aria-label", label);
+    if (action === "speechRate") {
+      control.setAttribute("aria-haspopup", "dialog");
+      control.setAttribute("aria-expanded", "false");
+    }
+    if (SWITCH_FEATURES.has(action as FeatureId) || action === "screenSound") {
+      control.setAttribute("aria-pressed", "false");
+    }
+    control.innerHTML = [
+      `<span class="a11y-control__icon">${ICONS[icon] ?? ICONS.help}</span>`,
+      `<span class="a11y-control__label">${label}</span>`,
+      '<span class="a11y-control__meta" data-control-meta></span>',
+    ].join("");
+    this.controls.set(action, control);
+    return control;
+  }
+
+  private buildRatePanel(): HTMLDivElement {
+    const panel = document.createElement("div");
+    panel.className = "a11y-rate-panel";
+    panel.id = `${this.host.id}-rate-panel`;
+    panel.role = "dialog";
+    panel.setAttribute("aria-label", "语速设置");
+    panel.hidden = true;
+
+    const heading = document.createElement("div");
+    heading.className = "a11y-rate-panel__heading";
+    heading.textContent = "选择朗读速度";
+
+    const presets = document.createElement("div");
+    presets.className = "a11y-rate-panel__presets";
+    presets.role = "group";
+    presets.setAttribute("aria-label", "语速预设");
+    for (const rate of [0.75, 1, 1.25, 1.5]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "a11y-rate-preset";
+      button.dataset.rate = String(rate);
+      button.textContent = `${formatRate(rate)}×`;
+      presets.append(button);
+    }
+
+    const sliderLabel = document.createElement("label");
+    sliderLabel.className = "a11y-rate-panel__slider-label";
+    sliderLabel.htmlFor = `${this.host.id}-rate-slider`;
+    sliderLabel.textContent = "精细调整";
+
+    this.rateSlider = document.createElement("input");
+    this.rateSlider.id = `${this.host.id}-rate-slider`;
+    this.rateSlider.type = "range";
+    this.rateSlider.min = "0.5";
+    this.rateSlider.max = "2";
+    this.rateSlider.step = "0.05";
+    this.rateSlider.value = "1";
+
+    this.rateValue = document.createElement("output");
+    this.rateValue.className = "a11y-rate-panel__value";
+    this.rateValue.htmlFor = this.rateSlider.id;
+    this.rateValue.value = "1×";
+
+    panel.append(heading, presets, sliderLabel, this.rateSlider, this.rateValue);
+    const rateButton = this.controls.get("speechRate");
+    rateButton?.setAttribute("aria-controls", panel.id);
+    return panel;
+  }
+
+  private bindEvents(): void {
+    this.toolbar.addEventListener("click", (event) => {
+      const control = (event.target as Element).closest<HTMLElement>(
+        "[data-toolbar-item]",
+      );
+      if (!control || !this.toolbar.contains(control)) {
+        return;
+      }
+      const action = control.dataset.action as ToolbarAction;
+      this.callbacks.onAction(action, control);
+    });
+
+    this.toolbar.addEventListener("keydown", (event) => {
+      this.handleToolbarKeydown(event);
+    });
+
+    this.ratePanel.addEventListener("click", (event) => {
+      const button = (event.target as Element).closest<HTMLButtonElement>(
+        "[data-rate]",
+      );
+      if (!button) {
+        return;
+      }
+      this.callbacks.onRateChange(Number(button.dataset.rate), button);
+      this.rateSlider.focus();
+    });
+    this.rateSlider.addEventListener("input", () => {
+      this.callbacks.onRateChange(Number(this.rateSlider.value), this.rateSlider);
+    });
+    this.ratePanel.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        this.closeRatePanel(true);
+      }
+    });
+
+    this.revealButton.addEventListener("click", () => this.expandAndFocus());
+    this.root.addEventListener("pointerenter", () => {
+      this.cancelCollapse();
+      this.setCollapsed(false);
+    });
+    this.root.addEventListener("pointerleave", () => this.scheduleCollapse());
+    this.root.addEventListener("focusin", () => {
+      this.cancelCollapse();
+      this.setCollapsed(false);
+    });
+    this.root.addEventListener("focusout", () => {
+      window.setTimeout(() => this.scheduleCollapse(), 0);
+    });
+  }
+
+  private handleToolbarKeydown(event: KeyboardEvent): void {
+    const control = (event.target as Element).closest<HTMLElement>(
+      "[data-toolbar-item]",
+    );
+    if (!control) {
+      return;
+    }
+    const items = this.getNavigableItems();
+    const index = items.indexOf(control);
+    let nextIndex: number;
+    switch (event.key) {
+      case "ArrowRight":
+        nextIndex = (index + 1) % items.length;
+        break;
+      case "ArrowLeft":
+        nextIndex = (index - 1 + items.length) % items.length;
+        break;
+      case "Home":
+        nextIndex = 0;
+        break;
+      case "End":
+        nextIndex = items.length - 1;
+        break;
+      case "Enter":
+      case " ":
+        event.preventDefault();
+        control.click();
+        return;
+      default:
+        return;
+    }
+    if (items.length === 0) {
+      return;
+    }
+    event.preventDefault();
+    const next = items[nextIndex];
+    if (next) {
+      this.setRovingItem(next);
+      next.focus();
+      next.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  }
+
+  private getNavigableItems(): HTMLElement[] {
+    const group = this.state?.isReadScreen ? this.screenGroup : this.mainGroup;
+    return Array.from(
+      group.querySelectorAll<HTMLElement>(
+        "[data-toolbar-item]:not([data-skip-toolbar-nav])",
+      ),
+    );
+  }
+
+  private setRovingItem(active: HTMLElement): void {
+    for (const item of this.getNavigableItems()) {
+      item.tabIndex = item === active ? 0 : -1;
+    }
+  }
+
+  private openRatePanel(): void {
+    this.cancelCollapse();
+    this.ratePanelOpen = true;
+    this.ratePanel.hidden = false;
+    const button = this.controls.get("speechRate");
+    button?.setAttribute("aria-expanded", "true");
+    const currentPreset = this.ratePanel.querySelector<HTMLButtonElement>(
+      `[data-rate="${this.state?.speechRate ?? 1}"]`,
+    );
+    (currentPreset ?? this.rateSlider).focus();
+  }
+
+  private updateAvailability(): void {
+    const zoom = this.state?.zoom ?? 1;
+    const zoomIn = this.controls.get("zoomIn");
+    const zoomOut = this.controls.get("zoomOut");
+    if (zoomIn) {
+      const unavailable = zoom >= this.config.zoom.max;
+      zoomIn.setAttribute("aria-disabled", String(unavailable));
+      zoomIn.dataset.unavailableReason = `已达到最大缩放 ${Math.round(this.config.zoom.max * 100)}%`;
+    }
+    if (zoomOut) {
+      const unavailable = zoom <= this.config.zoom.min;
+      zoomOut.setAttribute("aria-disabled", String(unavailable));
+      zoomOut.dataset.unavailableReason = `已达到最小缩放 ${Math.round(this.config.zoom.min * 100)}%`;
+    }
+  }
+
+  private getPressedState(
+    feature: FeatureId,
+    state: AccessibilityToolState,
+  ): boolean {
+    switch (feature) {
+      case "reading":
+        return state.readingEnabled;
+      case "largeCursor":
+        return state.largeCursor;
+      case "crosshair":
+        return state.crosshair;
+      case "fullscreen":
+        return state.isFullscreen;
+      case "pin":
+        return state.isPinned;
+      case "readScreen":
+        return state.isReadScreen;
+      default:
+        return false;
+    }
+  }
+
+  private updateFeatureMeta(
+    feature: FeatureId,
+    control: HTMLElement,
+    state: AccessibilityToolState,
+  ): void {
+    const meta = control.querySelector<HTMLElement>("[data-control-meta]");
+    if (!meta) {
+      return;
+    }
+    switch (feature) {
+      case "speechRate":
+        meta.textContent = `${formatRate(state.speechRate)}×`;
+        control.setAttribute("aria-label", `语速，当前 ${formatRate(state.speechRate)} 倍`);
+        break;
+      case "colorScheme":
+        meta.textContent = COLOR_SCHEME_LABELS[state.colorScheme].replace("配色", "");
+        control.setAttribute(
+          "aria-label",
+          `配色，当前${COLOR_SCHEME_LABELS[state.colorScheme]}`,
+        );
+        break;
+      case "zoomIn":
+      case "zoomOut":
+        meta.textContent = `${Math.round(state.zoom * 100)}%`;
+        control.setAttribute(
+          "aria-label",
+          `${FEATURE_LABELS[feature]}，当前 ${Math.round(state.zoom * 100)}%`,
+        );
+        break;
+      default:
+        meta.textContent = "";
+    }
+  }
+
+  private updateHelpLinks(): void {
+    for (const control of [this.mainGroup, this.screenGroup]) {
+      const link = control.querySelector<HTMLAnchorElement>(
+        '[data-action="help"]',
+      );
+      if (link) {
+        link.href = this.config.toolbar.helpUrl;
+      }
+    }
+  }
+
+  private createOverlay(className: string): HTMLDivElement {
+    const element = document.createElement("div");
+    element.className = className;
+    element.hidden = true;
+    element.setAttribute("aria-hidden", "true");
+    return element;
+  }
+
+  private findControls(action: ToolbarAction): HTMLElement[] {
+    return Array.from(
+      this.root.querySelectorAll<HTMLElement>(
+        `[data-toolbar-item][data-action="${action}"]`,
+      ),
+    );
+  }
+
+  private findVisibleControl(action: ToolbarAction): HTMLElement | null {
+    return (
+      this.findControls(action).find(
+        (control) => !control.closest<HTMLElement>("[hidden]"),
+      ) ?? null
+    );
+  }
+}
+
+function formatRate(rate: number): string {
+  return Number(rate.toFixed(2)).toString();
+}
+
+function getGlobalRect(element: HTMLElement): DOMRect {
+  const local = element.getBoundingClientRect();
+  let left = local.left;
+  let top = local.top;
+  let view = element.ownerDocument.defaultView;
+  try {
+    while (isHTMLElement(view?.frameElement)) {
+      const frame = view.frameElement;
+      const frameRect = frame.getBoundingClientRect();
+      left += frameRect.left + frame.clientLeft;
+      top += frameRect.top + frame.clientTop;
+      view = frame.ownerDocument.defaultView;
+    }
+  } catch {
+    // The element remains highlightable inside the last same-origin boundary.
+  }
+  return new DOMRect(left, top, local.width, local.height);
+}

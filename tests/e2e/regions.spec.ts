@@ -1,0 +1,85 @@
+import { expect, test } from "@playwright/test";
+
+test.beforeEach(async ({ page }) => {
+  await page.goto("/?debug=1");
+  await page.getByRole("button", { name: "打开无障碍工具" }).click();
+  await page.getByRole("button", { name: "读屏专用" }).click();
+});
+
+test("shows six live counts and navigates each category in DOM order", async ({
+  page,
+}) => {
+  const host = page.locator("[data-a11y-tool-host]");
+  await expect(
+    host.getByRole("button", { name: "视窗区，共 2 个" }),
+  ).toBeVisible();
+  await expect(
+    host.getByRole("button", { name: "导航区，共 4 个" }),
+  ).toBeVisible();
+  await expect(
+    host.getByRole("button", { name: "交互区，共 2 个" }),
+  ).toBeVisible();
+  await expect(
+    host.getByRole("button", { name: "服务区，共 2 个" }),
+  ).toBeVisible();
+  await expect(
+    host.getByRole("button", { name: "列表区，共 1 个" }),
+  ).toBeVisible();
+  await expect(
+    host.getByRole("button", { name: "正文区，共 4 个" }),
+  ).toBeVisible();
+
+  await host.getByRole("button", { name: "导航区，共 4 个" }).click();
+  await expect(page.locator("header nav")).toBeFocused();
+  await page.keyboard.press("Alt+Shift+Digit2");
+  await expect(page.locator(".region-ledger nav")).toBeFocused();
+});
+
+test("updates counts after dynamic add, hide and remove", async ({ page }) => {
+  const host = page.locator("[data-a11y-tool-host]");
+  const service = host.getByRole("button", { name: /服务区，共/ });
+  await expect(service).toHaveAttribute("aria-label", "服务区，共 2 个");
+
+  await page.getByRole("button", { name: "新增服务区" }).click();
+  await expect(service).toHaveAttribute("aria-label", "服务区，共 3 个");
+  await page.getByRole("button", { name: "隐藏/显示最新区域" }).click();
+  await expect(service).toHaveAttribute("aria-label", "服务区，共 2 个");
+  await page.getByRole("button", { name: "隐藏/显示最新区域" }).click();
+  await expect(service).toHaveAttribute("aria-label", "服务区，共 3 个");
+  await page.getByRole("button", { name: "删除最新区域" }).click();
+  await expect(service).toHaveAttribute("aria-label", "服务区，共 2 个");
+});
+
+test("does not intercept region shortcuts in editable fields", async ({ page }) => {
+  const search = page.getByRole("searchbox", { name: "示例检索" });
+  await search.focus();
+  await page.keyboard.press("Alt+Shift+Digit2");
+  await expect(search).toBeFocused();
+});
+
+test("recovers when the currently focused dynamic region is removed", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "新增服务区" }).click();
+  const service = page
+    .locator("[data-a11y-tool-host]")
+    .getByRole("button", { name: "服务区，共 3 个" });
+  await service.click();
+  await page.keyboard.press("Alt+Shift+Digit4");
+  const dynamicRegion = page.locator("#dynamic-regions > section");
+  await expect(dynamicRegion).toBeFocused();
+
+  await dynamicRegion.evaluate((element) => element.remove());
+  await expect(page.locator(".final-chapter")).toBeFocused();
+});
+
+test("restores read-screen mode on the next open", async ({ page }) => {
+  const host = page.locator("[data-a11y-tool-host]");
+  await host.getByRole("button", { name: "退出" }).click();
+  await page.getByRole("button", { name: "打开无障碍工具" }).click();
+  await expect(
+    page
+      .locator("[data-a11y-tool-host]")
+      .getByRole("button", { name: /导航区，共/ }),
+  ).toBeVisible();
+});

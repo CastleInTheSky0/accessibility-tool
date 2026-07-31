@@ -1,0 +1,129 @@
+.help-header {
+  align-items: center;
+  background: #171717;
+  color: #fff;
+  display: flex;
+  justify-content: space-between;
+  min-height: 72px;
+  padding: 14px clamp(20px, 5vw, 80px);
+}
+
+.help-layout {
+  display: grid;
+  grid-template-columns: minmax(210px, 0.28fr) minmax(0, 1fr);
+  margin: 0 auto;
+  max-width: 1500px;
+}
+
+.help-layout > aside {
+  border-right: 2px solid #171717;
+  padding: 70px 28px;
+}
+
+.help-layout > aside nav {
+  display: grid;
+  gap: 14px;
+  position: sticky;
+  top: 30px;
+}
+
+.help-layout > aside a {
+  font-weight: 750;
+}
+
+.help-layout > article {
+  padding: clamp(52px, 7vw, 110px) clamp(28px, 8vw, 130px);
+}
+
+.help-layout h1 {
+  font-size: clamp(58px, 9vw, 132px);
+  letter-spacing: -0.075em;
+  line-height: 0.84;
+  margin: 18px 0 100px;
+}
+
+.help-layout section {
+  border-top: 7px solid #171717;
+  margin: 0 0 72px;
+  padding-top: 24px;
+}
+
+.help-layout h2 {
+  font-size: clamp(30px, 4vw, 54px);
+  letter-spacing: -0.045em;
+  margin: 0 0 24px;
+}
+
+.help-layout p,
+.help-layout li,
+.help-layout dd {
+  font-size: 18px;
+  line-height: 1.75;
+}
+
+.feature-list {
+  margin: 0;
+}
+
+.feature-list > div {
+  border-bottom: 1px solid #8b887e;
+  display: grid;
+  gap: 24px;
+  grid-template-columns: 140px 1fr;
+  padding: 18px 0;
+}
+
+.feature-list dt {
+  color: #b5390c;
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.feature-list dd {
+  margin: 0;
+}
+
+table {
+  border-collapse: collapse;
+  font-size: 17px;
+  width: 100%;
+}
+
+th,
+td {
+  border-bottom: 1px solid #77746c;
+  padding: 14px 10px;
+  text-align: left;
+}
+
+th {
+  background: #171717;
+  color: #fff;
+}
+
+.back-link a {
+  font-size: 20px;
+  font-weight: 900;
+}
+
+@media (max-width: 800px) {
+  .help-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .help-layout > aside {
+    border-bottom: 2px solid #171717;
+    border-right: 0;
+    padding: 24px;
+  }
+
+  .help-layout > aside nav {
+    display: flex;
+    flex-wrap: wrap;
+    position: static;
+  }
+
+  .feature-list > div {
+    grid-template-columns: 1fr;
+  }
+}

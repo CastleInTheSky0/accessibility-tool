@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shadow DOM 隔离演示 — AccessibilityTool</title>
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="stylesheet" href="/demos/hostile.css" />
+    <script defer src="/accessibility-tool.min.js"></script>
+    <script defer src="/demos/hostile.js"></script>
+  </head>
+  <body>
+    <main data-a11y-region="content" data-a11y-label="强样式页面正文">
+      <h1>宿主页面正在强制改写一切样式。</h1>
+      <p>按钮被改成巨大紫色圆形，SVG 被旋转，所有 div 都带红框；工具栏仍应保持深灰、浅色按钮和橙色焦点。</p>
+      <button id="open-tool" type="button">打开隔离工具栏</button>
+      <p><a href="/">返回完整演示</a></p>
+    </main>
+  </body>
+</html>
