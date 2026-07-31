@@ -1,0 +1,32 @@
+{
+  "id": "accessibility-tool-v0-1",
+  "name": "accessibility-tool-v0-1",
+  "title": "Build AccessibilityTool v0.1.0",
+  "description": "Implement the confirmed desktop accessibility toolbar PRD without expanding scope.",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "accessibility-tool",
+  "package": null,
+  "priority": "P2",
+  "creator": "Sylvan",
+  "assignee": "Sylvan",
+  "createdAt": "2026-07-31",
+  "completedAt": "2026-07-31",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "src/tool.ts",
+    "src/styles/accessibility-tool.scss",
+    "src/features/regions.ts",
+    "src/features/tabs.ts",
+    "README.md"
+  ],
+  "notes": "Implementation and verification completed. The task remains unarchived and uncommitted because this workspace is not a Git repository.",
+  "meta": {}
+}
