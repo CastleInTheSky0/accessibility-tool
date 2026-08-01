@@ -28,6 +28,12 @@ When the accessibility tool is open, make focus and blind-path context easy to l
 - Ordinary host `role="tabpanel"` elements and configured non-native floating panels use the boolean `data-a11y-hidden` attribute for visual state, with host CSS `[role="tabpanel"][data-a11y-hidden] { display: none; }`; these host panels do not directly use native `hidden`.
 - Host-page original events own `data-a11y-hidden`. The accessibility tool only dispatches those events and reversibly synchronizes `aria-selected` / `aria-hidden`, so neither attribute replaces the other's responsibility.
 - Native `<dialog>` remains on its platform lifecycle through `showModal()`, `open`, and `close()`.
+- A successful explicit `open()` persists an independent, versioned open intent derived from `storageKey`. The existing preference payload and version remain unchanged.
+- On refresh or same-origin navigation to another page that loads the same tool script, the runtime waits for DOM ready and uses the final pre-`DOMContentLoaded` site configuration before deciding whether to restore.
+- Automatic restoration starts the complete runtime and applies saved preferences, but it does not infer the current focused element as a trigger, move focus, or repeat the toolbar-open announcement.
+- `close()`, toolbar exit, and `destroy()` clear the open intent. `reset()` keeps the toolbar open and preserves the intent. `persistOpenState` defaults to `true`; setting it to `false` disables restoration and clears the current key.
+- Changing `storageKey` clears the previous true marker and migrates the intent when currently open. Failed automatic or explicit opening leaves no true marker.
+- Blocked storage falls back to page memory without throwing; inability to restore after a reload is expected in that mode.
 - The implementation should resist host-page CSS conflicts by applying reversible `!important` outline styles directly to the real target node.
 - The indicator follows every host-page focus change, including Tab, Shift+Tab, blind-path navigation, programmatic focus, and mouse-initiated focus.
 - Current page focus uses yellow `#ffb800`; the active blind-path region uses deep orange `#ff6c00`.
@@ -56,6 +62,8 @@ When the accessibility tool is open, make focus and blind-path context easy to l
 - Repeated category navigation cycles through matching regions in page DOM order with wraparound.
 - Do not trap focus or add descendant `tabindex` values to manufacture a custom sequence.
 - Do not directly toggle the host panel's `data-a11y-hidden` or visual styles from the tabs controller.
+- With no valid saved open intent, importing the script must remain lazy and must not render, scan, or bind high-frequency listeners.
+- Automatic restoration applies only to same-origin pages that load the same script; do not add cross-origin, cross-tab synchronization, or script injection.
 
 ## Acceptance Criteria (evolving)
 
@@ -85,6 +93,9 @@ When the accessibility tool is open, make focus and blind-path context easy to l
 - [x] Parent `role="tablist"` behavior attributes are ignored; per-option values and configuration/click fallbacks are covered by tests and documentation.
 - [x] Demo tab panels and the configured non-native floating panel use `data-a11y-hidden`, host event handlers own the toggle, and no host `[role="tabpanel"][hidden]` is introduced.
 - [x] `aria-hidden` remains tool-synchronized while `data-a11y-hidden` remains host-owned; native dialog behavior is unchanged.
+- [x] Successful explicit open persists a separate versioned marker; reset preserves it, while close/exit/destroy remove it.
+- [x] Reload and same-origin navigation restore the full runtime using final site configuration without focus theft or a repeated open announcement.
+- [x] Invalid/blocked storage, disabled persistence, key changes, failed opens, and pending restore races are covered without leaving stale true markers.
 
 ## Definition of Done
 
@@ -99,6 +110,7 @@ When the accessibility tool is open, make focus and blind-path context easy to l
 - Mobile-specific focus presentation.
 - A user-facing color or thickness setting in this version.
 - Highlighting elements inside cross-origin iframes.
+- Cross-origin persistence, real-time cross-tab synchronization, and injection into pages that do not load the tool script.
 
 ## Technical Notes
 
@@ -109,6 +121,8 @@ When the accessibility tool is open, make focus and blind-path context easy to l
 - The focus path is: host-page focus event -> page-effects lifecycle -> reversible outline ownership on the real node.
 - The region path is: scanner update -> reconcile temporary `tabindex="0"` across visible recognized regions -> native Tab or category navigation -> region state coordination.
 - Future configurability of focus color/thickness is intentionally deferred; this version uses the verified yellow/deep-orange pair.
+- Open-state persistence is owned by a dedicated store using `${storageKey}:open-state`; it is intentionally separate from `PersistedPreferences`.
+- The automatic path waits for actual `DOMContentLoaded` rather than treating `readyState="interactive"` as final, because deferred site configuration scripts still run during that state.
 
 ## Decision (ADR-lite, provisional)
 
@@ -124,3 +138,4 @@ When the accessibility tool is open, make focus and blind-path context easy to l
 2. Reconcile temporary `tabindex="0"` across every visible recognized region, auto-activate regions reached through ordinary Tab, preserve category cycling, and coordinate region/self/descendant focus colors.
 3. Restore all page-side styles and attributes when a region disappears, configuration changes, the tool closes, or it is destroyed without touching descendant tab order.
 4. Update unit and browser coverage for ordinary Tab entry, focus sources, region cycling, entry/exit, dynamic regions, toolbar exclusion, Shadow DOM/iframe behavior, and cleanup.
+5. Persist a separate open intent after successful explicit opening, restore it silently after final DOM-ready configuration, and cover lifecycle cleanup, storage failures, key migration, and same-origin navigation.

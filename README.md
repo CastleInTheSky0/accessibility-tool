@@ -1,6 +1,6 @@
 # AccessibilityTool
 
-`AccessibilityTool` 是一套面向桌面网站的原生 TypeScript 无障碍工具栏。它在接入页面显式调用后启动，提供朗读、语速、五种页面配色、页面缩放、大鼠标、十字线、标准全屏、页面焦点黄色轮廓、盲道活动区域深橙色轮廓、六类盲道区域导航，以及标准选项卡与关联面板的键盘增强。
+`AccessibilityTool` 是一套面向桌面网站的原生 TypeScript 无障碍工具栏。首次使用由接入页面显式调用启动；成功打开后，默认会在刷新或进入另一个同源且引入相同脚本的页面时静默恢复。工具提供朗读、语速、五种页面配色、页面缩放、大鼠标、十字线、标准全屏、页面焦点黄色轮廓、盲道活动区域深橙色轮廓、六类盲道区域导航，以及标准选项卡与关联面板的键盘增强。
 
 - 版本：`0.1.0`
 - 构建：TypeScript + Vite Library Mode + pnpm
@@ -20,6 +20,8 @@
   const button = document.querySelector("#open-a11y");
 
   AccessibilityTool.configure({
+    storageKey: "site-accessibility:preferences",
+    persistOpenState: true,
     toolbar: { helpUrl: "/accessibility/help.html" },
     regions: { autoDetect: true },
   });
@@ -30,7 +32,7 @@
 </script>
 ```
 
-脚本加载时不会自动显示、扫描页面或绑定高频监听。首次调用 `open()` 后才创建工具栏和启动页面增强。
+没有已保存的打开意图时，脚本加载后不会显示工具栏、扫描页面或绑定高频监听。首次成功调用 `open()` 后，工具使用与 `storageKey` 派生的独立版本化键保存打开意图；同源页面刷新或导航且页面继续引入该脚本时，会在 DOM ready 后完整恢复工具栏和页面增强，但不会抢焦点或再次播报“工具栏已打开”。`close()`、工具栏“退出”和 `destroy()` 会清除打开意图；`reset()` 不会。可设置 `persistOpenState: false` 禁用并清理当前键的标记。
 
 ### ESM
 
@@ -139,7 +141,7 @@ pnpm build
 
 ## 隐私
 
-工具默认不联网、不发送统计请求，也不会记录、保存或上传页面内容和朗读文本。用户偏好仅保存在接入站点的 `localStorage`；不可用时退化为当前页面内存。
+工具默认不联网、不发送统计请求，也不会记录、保存或上传页面内容和朗读文本。用户偏好与独立的打开意图仅保存在接入站点的 `localStorage`；不可用时退化为当前页面内存，因此无法跨刷新恢复是预期行为。
 
 ## 首版边界
 

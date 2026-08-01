@@ -119,6 +119,7 @@ export interface AccessibilityToolConfig {
   strict?: boolean;
   locale?: string;
   storageKey?: string;
+  persistOpenState?: boolean;
   features?: Partial<Record<FeatureId, boolean>>;
   toolbar?: ToolbarConfig;
   speech?: SpeechConfig;

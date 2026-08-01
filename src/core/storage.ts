@@ -6,6 +6,11 @@ interface StoredPayload {
   preferences: PersistedPreferences;
 }
 
+interface StoredOpenStatePayload {
+  version: number;
+  isOpen: true;
+}
+
 const isBoolean = (value: unknown): value is boolean =>
   typeof value === "boolean";
 
@@ -81,6 +86,71 @@ export class PreferenceStore {
       globalThis.localStorage?.removeItem(this.key);
     } catch {
       // Storage may be unavailable; memory is already cleared.
+    }
+  }
+}
+
+export function deriveOpenStateStorageKey(storageKey: string): string {
+  return `${storageKey}:open-state`;
+}
+
+export class OpenStateStore {
+  private memory = false;
+
+  constructor(
+    private readonly key: string,
+    private readonly version: number,
+  ) {}
+
+  load(): boolean {
+    let raw: string | null;
+    try {
+      raw = globalThis.localStorage?.getItem(this.key) ?? null;
+    } catch {
+      return this.memory;
+    }
+    if (raw === null) {
+      return this.memory;
+    }
+    try {
+      const payload = JSON.parse(raw) as Partial<StoredOpenStatePayload>;
+      if (payload.version !== this.version || payload.isOpen !== true) {
+        this.memory = false;
+        this.removePersistedValue();
+        return false;
+      }
+      this.memory = true;
+      return true;
+    } catch {
+      this.memory = false;
+      this.removePersistedValue();
+      return false;
+    }
+  }
+
+  markOpen(): void {
+    this.memory = true;
+    try {
+      const payload: StoredOpenStatePayload = {
+        version: this.version,
+        isOpen: true,
+      };
+      globalThis.localStorage?.setItem(this.key, JSON.stringify(payload));
+    } catch {
+      // Memory fallback cannot survive a page reload, which is expected.
+    }
+  }
+
+  clear(): void {
+    this.memory = false;
+    this.removePersistedValue();
+  }
+
+  private removePersistedValue(): void {
+    try {
+      globalThis.localStorage?.removeItem(this.key);
+    } catch {
+      // Storage may be unavailable; the in-memory value remains authoritative.
     }
   }
 }

@@ -6,7 +6,7 @@
 
 - Trigger: any change to the public singleton API, toolbar feature set, blind-path region protocol, tab/dialog enhancement, preference persistence, or build output.
 - Runtime scope: browser-native TypeScript with zero runtime dependencies; desktop layouts start at 1024px.
-- Lifecycle boundary: importing the bundle must not render UI, scan the host page, or bind high-frequency listeners. Runtime work begins on the first `open()` call and is reversible through `close()`, `reset()`, or `destroy()`.
+- Lifecycle boundary: importing the bundle with no valid saved open intent must not render UI, scan the host page, or bind high-frequency listeners. A successful explicit `open()` may persist an open intent; on later same-origin pages that load the same bundle, runtime work may resume after DOM ready. All runtime work remains reversible through `close()`, `reset()`, or `destroy()`.
 - Styling boundary: author SCSS lives at `src/styles/accessibility-tool.scss`; Vite embeds it for the default bundle and emits `dist/accessibility-tool.css` for strict CSP integrations.
 
 ### 2. Signatures
@@ -32,6 +32,11 @@ interface AccessibilityToolApi {
     eventName: K,
     listener: (payload: AccessibilityToolEventMap[K]) => void,
   ): AccessibilityToolApi;
+}
+
+interface AccessibilityToolConfig {
+  storageKey?: string;
+  persistOpenState?: boolean; // default true
 }
 ```
 
@@ -69,9 +74,14 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 
 - Session configuration expires on `close()` and is never persisted.
 - Configure feature visibility and the speech adapter before `open()`; changes to an already-mounted control list take effect on the next open.
+- Automatic restoration waits for DOM ready and reads the final site configuration, including any `configure({ storageKey })` call made before `DOMContentLoaded`.
 - The production toolbar uses a closed Shadow Root; `debug: true` uses an open Shadow Root and adds diagnostics.
 - `open({ trigger })` registers the trigger, manages `aria-controls` / `aria-expanded`, and returns focus to the latest connected trigger on close.
-- Persist only reading, speech rate, color scheme, zoom, large cursor, crosshair, pinning, and read-screen mode. Never persist fullscreen or spoken page text.
+- Explicit `open()` writes an open intent only after the runtime has opened successfully. Automatic restoration starts the full runtime and hydrates preferences, but must not infer a trigger from `document.activeElement`, move focus, or repeat the "toolbar opened" announcement.
+- The open intent uses an independent, versioned `${storageKey}:open-state` payload. It must not change the existing preference payload or preference version. Persist only reading, speech rate, color scheme, zoom, large cursor, crosshair, pinning, and read-screen mode in the preference payload; never persist fullscreen or spoken page text.
+- `close()`, the toolbar exit action, and `destroy()` clear the open intent. `reset()` clears preferences while preserving the current open state and open intent. `persistOpenState: false` clears the current marker and disables restoration.
+- Changing `storageKey` must clear any true marker under the previous key. If the runtime is open and persistence remains enabled, migrate the intent to the new derived key.
+- Restoration covers only same-origin navigation where the destination also loads and configures the same tool script. It does not inject into pages without the script, synchronize tabs in real time, or cross origins.
 - Main toolbar order is fixed by `MAIN_FEATURE_ORDER`; feature flags may remove controls but must not reorder the remaining controls.
 - Region value mapping is fixed:
 
@@ -116,20 +126,26 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 | Host focus outline uses inline values or `!important` | Override it only while owned, then restore the exact original values and priorities. |
 | Open Shadow Root or same-origin iframe gains focus | Resolve the deepest focused page element, exclude the toolbar composed tree, and apply the outline directly to that real node. |
 | Corrupt, incompatible, or blocked localStorage | Do not throw; use validated defaults or the in-memory fallback. |
+| Missing or invalid saved open intent | Preserve lazy loading: do not render, scan, or bind high-frequency listeners. Remove malformed/incompatible open-state payloads. |
+| Automatic restoration fails | Catch the error, tear down incomplete runtime nodes, and clear the attempted/current open-intent keys so later pages do not repeat the failure. |
+| Explicit `open()` fails | Reject normally, tear down incomplete runtime nodes, and leave no true open intent. |
+| Automatic restoration races with explicit open/close | Serialize the pending open. Explicit open retains trigger/focus/announcement semantics; close waits for the pending restoration, then closes and clears intent. |
+| `localStorage` is unavailable | Continue with in-page memory and no exception. Cross-refresh restoration is unavailable by design. |
 | Stale speech callback after interruption | Ignore it; do not emit a false `error` or `speechend` for the canceled request. |
 | Cross-origin iframe | Never read its document; treat the iframe element as atomic only when explicitly configured or marked. |
 | External code replaces `history.pushState` after open | Do not overwrite the newer integration when the tool stops. |
 
 ### 5. Good / Base / Bad Cases
 
-- Good: a marked region contains native links and buttons; ordinary Tab first shows one yellow outline on the container, and the next Tab produces an orange outer region plus a yellow current descendant.
-- Base: an unmarked semantic page is conservatively detected (`nav`, named `form`, `main`, `article`); ordinary page focus gets one yellow outline and the host outline returns after close.
-- Bad: sharing one mutation owner between region context and current focus corrupts restoration; sharing the reading overlay with either state lets speech cleanup erase navigation context; intercepting Tab, auto-tabbing readable tags, overriding author `tabindex`, or flattening composite widgets into multiple Tab stops is forbidden.
+- Good: a marked region contains native links and buttons; ordinary Tab first shows one yellow outline on the container, and the next Tab produces an orange outer region plus a yellow current descendant. After an explicit open, a same-origin reload silently restores the toolbar without moving the page's current focus.
+- Base: an unmarked semantic page is conservatively detected (`nav`, named `form`, `main`, `article`); ordinary page focus gets one yellow outline and the host outline returns after close. With no valid open intent, bundle import remains lazy.
+- Bad: sharing one mutation owner between region context and current focus corrupts restoration; sharing the reading overlay with either state lets speech cleanup erase navigation context; intercepting Tab, auto-tabbing readable tags, overriding author `tabindex`, flattening composite widgets into multiple Tab stops, restoring before final pre-DOMContentLoaded configuration, or focusing/announcing during automatic restoration is forbidden.
 
 ### 6. Tests Required
 
 - Unit: config deep merge and immutable feature order.
-- Unit: storage validation, version rejection, clear, and unavailable-storage fallback.
+- Unit: preference and independent open-state storage validation, version rejection, clear, and unavailable-storage fallback.
+- Unit: successful open/close/destroy/reset intent lifecycle, disabled persistence, storage-key migration, failed-open cleanup, silent final-config restoration, and explicit-open/close races with pending restoration.
 - Unit: accessible-name priority, control state text, hidden content, and Shadow Root `aria-labelledby`.
 - Unit: region source priority, numeric/English/legacy mapping, semantic-off mode, open Shadow Roots, safe history restoration, current-region wrap and reclassification recovery.
 - Unit: every visible recognized region receives a reversible Tab anchor; ordinary focus auto-activates the containing region; reading overlay, active-region owner, and current-focus owner remain independent; region focus is yellow, descendant focus restores the region to orange, and values/priorities restore exactly.
@@ -137,6 +153,7 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 - Unit: interrupted speech must not emit stale errors.
 - Unit: hidden features must be consistent between main and read-screen toolbars.
 - E2E: lazy open, fixed order, roving toolbar keyboard model, pin/collapse shortcut, zoom isolation, reset, and Fullscreen API.
+- E2E: explicit open followed by reload and same-origin navigation restores silently without focus theft; close followed by reload stays closed.
 - E2E: six live region counts, DOM-order navigation, editable-field shortcut exclusion, dynamic add/hide/remove, recovery, and persistence.
 - E2E: Tab, Shift+Tab, pointer, and script focus use one yellow real-node outline; the host outline is overridden only while owned and restores across close/destroy/reopen.
 - E2E: ordinary Tab reaches recognized region containers before their descendants; category selection uses the same anchors; native Tab shows orange region context plus yellow descendant focus; Shift+Tab returns through the region anchor; dynamic invalidation and close/destroy restore all temporary tab stops.
@@ -216,6 +233,8 @@ for (const [index, item] of descendants.entries()) {
 
 ```js
 AccessibilityTool.configure({
+  storageKey: "site-accessibility:preferences",
+  persistOpenState: true,
   toolbar: {
     theme: { accent: "#ff7a00" },
     styleUrl: "/assets/accessibility-tool.css",

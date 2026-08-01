@@ -3,6 +3,7 @@ import type { ColorScheme, FeatureId, RegionType } from "../types";
 export const TOOL_NAMESPACE = "accessibility-tool";
 export const TOOL_HOST_ATTRIBUTE = "data-a11y-tool-host";
 export const STORAGE_VERSION = 1;
+export const OPEN_STATE_STORAGE_VERSION = 1;
 
 export const REGION_TYPES: readonly RegionType[] = [
   "viewport",

@@ -1,4 +1,9 @@
-import { COLOR_SCHEMES, REGION_TYPES, STORAGE_VERSION } from "./core/constants";
+import {
+  COLOR_SCHEMES,
+  OPEN_STATE_STORAGE_VERSION,
+  REGION_TYPES,
+  STORAGE_VERSION,
+} from "./core/constants";
 import {
   DEFAULT_CONFIG,
   mergeConfig,
@@ -7,7 +12,11 @@ import {
 import { DomLedger } from "./core/dom-ledger";
 import { isEditableTarget, isHTMLElement } from "./core/dom";
 import { TypedEmitter } from "./core/emitter";
-import { PreferenceStore } from "./core/storage";
+import {
+  deriveOpenStateStorageKey,
+  OpenStateStore,
+  PreferenceStore,
+} from "./core/storage";
 import { PageEffectsController } from "./features/page-effects";
 import { ReadingController } from "./features/reading";
 import { RegionNavigationController } from "./features/region-navigation";
@@ -26,7 +35,14 @@ import type {
   RegionType,
 } from "./types";
 
-class AccessibilityToolRuntime implements AccessibilityToolApi {
+type OpenMode = "explicit" | "restore";
+
+interface OpenBehavior {
+  silent: boolean;
+  announceIfAlreadyOpen: boolean;
+}
+
+export class AccessibilityToolRuntime implements AccessibilityToolApi {
   private baseConfig = mergeConfig(DEFAULT_CONFIG);
   private activeConfig = this.baseConfig;
   private sessionConfig: AccessibilityToolConfig | undefined;
@@ -35,6 +51,7 @@ class AccessibilityToolRuntime implements AccessibilityToolApi {
   private readonly triggerLedger = new DomLedger();
   private readonly triggers = new Set<HTMLElement>();
   private readonly stores = new Map<string, PreferenceStore>();
+  private readonly openStateStores = new Map<string, OpenStateStore>();
   private readonly shortcutDocuments = new Set<Document>();
 
   private lastTrigger: HTMLElement | null = null;
@@ -50,11 +67,28 @@ class AccessibilityToolRuntime implements AccessibilityToolApi {
   private tabs: TabsController | null = null;
   private tabsStarted = false;
   private suppressFullscreenAnnouncement = false;
+  private openOperation: Promise<AccessibilityToolApi> | null = null;
+  private openOperationMode: OpenMode | null = null;
+  private autoRestoreSettled = false;
+  private silentlyRestored = false;
+
+  constructor() {
+    if (typeof document !== "undefined") {
+      void this.restoreOpenStateWhenReady();
+    }
+  }
 
   configure(config: AccessibilityToolConfig): AccessibilityToolApi {
+    const previousStorageKey = this.state.isOpen
+      ? this.activeConfig.storageKey
+      : this.baseConfig.storageKey;
     this.baseConfig = mergeConfig(this.baseConfig, config);
     if (this.state.isOpen) {
       this.activeConfig = mergeConfig(this.baseConfig, this.sessionConfig);
+    }
+    const nextConfig = this.state.isOpen ? this.activeConfig : this.baseConfig;
+    this.reconcileOpenIntentAfterConfig(previousStorageKey, nextConfig);
+    if (this.state.isOpen) {
       this.propagateConfig();
       this.applyState(false);
     }
@@ -64,8 +98,89 @@ class AccessibilityToolRuntime implements AccessibilityToolApi {
   async open(
     options: AccessibilityToolOpenOptions = {},
   ): Promise<AccessibilityToolApi> {
+    return this.openExplicitly(options, false);
+  }
+
+  private async openExplicitly(
+    options: AccessibilityToolOpenOptions,
+    announceAfterRestore: boolean,
+  ): Promise<AccessibilityToolApi> {
+    const pending = this.openOperation;
+    const pendingWasRestore = this.openOperationMode === "restore";
+    if (pending) {
+      try {
+        await pending;
+      } catch {
+        // An explicit request retries after a failed pending restoration/open.
+      }
+      return this.openExplicitly(
+        options,
+        announceAfterRestore || pendingWasRestore,
+      );
+    }
+    return this.beginOpen(
+      options,
+      "explicit",
+      announceAfterRestore || this.silentlyRestored,
+    );
+  }
+
+  private beginOpen(
+    options: AccessibilityToolOpenOptions,
+    mode: OpenMode,
+    announceIfAlreadyOpen: boolean,
+  ): Promise<AccessibilityToolApi> {
+    const operation = this.performTrackedOpen(options, {
+      silent: mode === "restore",
+      announceIfAlreadyOpen,
+    });
+    this.openOperation = operation;
+    this.openOperationMode = mode;
+    const clearOperation = (): void => {
+      if (this.openOperation === operation) {
+        this.openOperation = null;
+        this.openOperationMode = null;
+      }
+    };
+    operation.then(clearOperation, clearOperation);
+    return operation;
+  }
+
+  private async performTrackedOpen(
+    options: AccessibilityToolOpenOptions,
+    behavior: OpenBehavior,
+  ): Promise<AccessibilityToolApi> {
+    const previousStorageKey = this.state.isOpen
+      ? this.activeConfig.storageKey
+      : this.baseConfig.storageKey;
+    const attemptedStorageKey = mergeConfig(
+      this.baseConfig,
+      options.config,
+    ).storageKey;
+    try {
+      const result = await this.openInternal(options, behavior);
+      this.syncOpenIntentAfterSuccessfulOpen(previousStorageKey);
+      this.silentlyRestored = behavior.silent;
+      return result;
+    } catch (error) {
+      this.clearOpenIntent(previousStorageKey);
+      this.clearOpenIntent(attemptedStorageKey);
+      this.clearOpenIntent(this.activeConfig.storageKey);
+      if (!this.state.isOpen) {
+        this.teardownRuntimeNodes();
+      }
+      throw error;
+    }
+  }
+
+  private async openInternal(
+    options: AccessibilityToolOpenOptions,
+    behavior: OpenBehavior,
+  ): Promise<AccessibilityToolApi> {
     await ensureDocumentReady();
-    const trigger = this.resolveTrigger(options.trigger);
+    const trigger = behavior.silent
+      ? null
+      : this.resolveTrigger(options.trigger);
 
     if (this.state.isOpen) {
       if (options.config) {
@@ -79,6 +194,12 @@ class AccessibilityToolRuntime implements AccessibilityToolApi {
       }
       this.setTriggerExpanded(true);
       this.ui?.expandAndFocus();
+      if (behavior.announceIfAlreadyOpen) {
+        this.announce(
+          "无障碍工具栏已打开，使用左右方向键选择功能",
+          false,
+        );
+      }
       return this;
     }
 
@@ -124,8 +245,13 @@ class AccessibilityToolRuntime implements AccessibilityToolApi {
     this.setTriggerExpanded(true);
     this.emitState("open");
     await nextFrame();
-    this.ui?.focusFirst();
-    this.announce("无障碍工具栏已打开，使用左右方向键选择功能", false);
+    if (!behavior.silent) {
+      this.ui?.focusFirst();
+      this.announce(
+        "无障碍工具栏已打开，使用左右方向键选择功能",
+        false,
+      );
+    }
     if (this.state.isPinned && !this.state.isReadScreen) {
       this.ui?.scheduleCollapse();
     }
@@ -133,6 +259,8 @@ class AccessibilityToolRuntime implements AccessibilityToolApi {
   }
 
   async close(): Promise<AccessibilityToolApi> {
+    await this.settlePendingOpen();
+    this.clearKnownOpenIntents();
     await this.closeInternal(true);
     return this;
   }
@@ -179,6 +307,8 @@ class AccessibilityToolRuntime implements AccessibilityToolApi {
   }
 
   async destroy(): Promise<void> {
+    await this.settlePendingOpen();
+    this.clearKnownOpenIntents();
     if (this.state.isOpen) {
       await this.closeInternal(false);
     }
@@ -191,6 +321,7 @@ class AccessibilityToolRuntime implements AccessibilityToolApi {
     this.sessionConfig = undefined;
     this.activeConfig = this.baseConfig;
     this.state = createDefaultState(this.activeConfig);
+    this.silentlyRestored = false;
   }
 
   getState(): Readonly<AccessibilityToolState> {
@@ -211,6 +342,97 @@ class AccessibilityToolRuntime implements AccessibilityToolApi {
   ): AccessibilityToolApi {
     this.emitter.off(eventName, listener);
     return this;
+  }
+
+  private async restoreOpenStateWhenReady(): Promise<void> {
+    try {
+      await ensureDomContentLoaded();
+      const config = this.baseConfig;
+      if (!config.persistOpenState) {
+        this.clearOpenIntent(config.storageKey);
+        return;
+      }
+      if (
+        this.state.isOpen ||
+        (this.openOperation && this.openOperationMode === "explicit")
+      ) {
+        return;
+      }
+      if (!this.getOpenStateStore(config.storageKey).load()) {
+        return;
+      }
+      try {
+        await this.beginOpen({}, "restore", false);
+      } catch (error) {
+        this.clearOpenIntent(config.storageKey);
+        this.clearOpenIntent(this.activeConfig.storageKey);
+        this.reportError(error, "自动恢复无障碍工具栏失败，已清除打开状态。");
+      }
+    } finally {
+      this.autoRestoreSettled = true;
+    }
+  }
+
+  private async settlePendingOpen(): Promise<void> {
+    while (this.openOperation) {
+      const pending = this.openOperation;
+      try {
+        await pending;
+      } catch {
+        // The initiating open call owns its error; lifecycle cleanup continues.
+      }
+      if (this.openOperation === pending) {
+        this.openOperation = null;
+        this.openOperationMode = null;
+      }
+    }
+  }
+
+  private reconcileOpenIntentAfterConfig(
+    previousStorageKey: string,
+    nextConfig: ResolvedAccessibilityToolConfig,
+  ): void {
+    if (previousStorageKey !== nextConfig.storageKey) {
+      this.clearOpenIntent(previousStorageKey);
+    }
+    if (!nextConfig.persistOpenState) {
+      this.clearOpenIntent(nextConfig.storageKey);
+      return;
+    }
+    if (this.state.isOpen) {
+      this.getOpenStateStore(nextConfig.storageKey).markOpen();
+      return;
+    }
+    if (this.autoRestoreSettled) {
+      this.clearOpenIntent(nextConfig.storageKey);
+    }
+  }
+
+  private syncOpenIntentAfterSuccessfulOpen(
+    previousStorageKey: string,
+  ): void {
+    const currentStorageKey = this.activeConfig.storageKey;
+    if (previousStorageKey !== currentStorageKey) {
+      this.clearOpenIntent(previousStorageKey);
+    }
+    if (this.activeConfig.persistOpenState) {
+      this.getOpenStateStore(currentStorageKey).markOpen();
+    } else {
+      this.clearOpenIntent(currentStorageKey);
+    }
+  }
+
+  private clearKnownOpenIntents(): void {
+    for (const storageKey of new Set([
+      this.baseConfig.storageKey,
+      this.activeConfig.storageKey,
+    ])) {
+      this.clearOpenIntent(storageKey);
+    }
+  }
+
+  private clearOpenIntent(storageKey: string): void {
+    this.getOpenStateStore(storageKey).clear();
   }
 
   private createRuntimeNodes(): void {
@@ -364,6 +586,7 @@ class AccessibilityToolRuntime implements AccessibilityToolApi {
     this.emitState("close");
     this.sessionConfig = undefined;
     this.activeConfig = this.baseConfig;
+    this.silentlyRestored = false;
     if (returnFocus) {
       this.restoreTriggerFocus();
     }
@@ -647,6 +870,18 @@ class AccessibilityToolRuntime implements AccessibilityToolApi {
     return store;
   }
 
+  private getOpenStateStore(storageKey: string): OpenStateStore {
+    let store = this.openStateStores.get(storageKey);
+    if (!store) {
+      store = new OpenStateStore(
+        deriveOpenStateStorageKey(storageKey),
+        OPEN_STATE_STORAGE_VERSION,
+      );
+      this.openStateStores.set(storageKey, store);
+    }
+    return store;
+  }
+
   private savePreferences(): void {
     const preferences: PersistedPreferences = {
       readingEnabled: this.state.readingEnabled,
@@ -834,6 +1069,27 @@ async function ensureDocumentReady(): Promise<void> {
   await new Promise<void>((resolve) => {
     document.addEventListener("DOMContentLoaded", () => resolve(), { once: true });
   });
+}
+
+async function ensureDomContentLoaded(): Promise<void> {
+  if (
+    document.readyState === "complete" ||
+    hasDomContentLoadedTiming()
+  ) {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    document.addEventListener("DOMContentLoaded", () => resolve(), {
+      once: true,
+    });
+  });
+}
+
+function hasDomContentLoadedTiming(): boolean {
+  const navigation = globalThis.performance
+    ?.getEntriesByType?.("navigation")
+    .at(0) as PerformanceNavigationTiming | undefined;
+  return (navigation?.domContentLoadedEventStart ?? 0) > 0;
 }
 
 async function nextFrame(): Promise<void> {

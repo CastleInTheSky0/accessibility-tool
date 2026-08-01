@@ -11,6 +11,7 @@ export interface ResolvedAccessibilityToolConfig {
   strict: boolean;
   locale: string;
   storageKey: string;
+  persistOpenState: boolean;
   features: Record<FeatureId, boolean>;
   toolbar: {
     layoutMode: "push" | "overlay";
@@ -75,6 +76,7 @@ export const DEFAULT_CONFIG: ResolvedAccessibilityToolConfig = {
   strict: false,
   locale: "zh-CN",
   storageKey: "accessibility-tool:preferences",
+  persistOpenState: true,
   features: defaultFeatures,
   toolbar: {
     layoutMode: "push",

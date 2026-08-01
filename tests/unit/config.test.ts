@@ -17,6 +17,7 @@ describe("configuration", () => {
     });
 
     expect(config.toolbar.layoutMode).toBe("overlay");
+    expect(config.persistOpenState).toBe(true);
     expect(config.toolbar.theme.accent).toBe("#0af");
     expect(config.toolbar.theme.background).toBe("#2d2f31");
     expect(config.features.crosshair).toBe(false);
