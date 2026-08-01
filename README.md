@@ -1,6 +1,6 @@
 # AccessibilityTool
 
-`AccessibilityTool` 是一套面向桌面网站的原生 TypeScript 无障碍工具栏。它在接入页面显式调用后启动，提供朗读、语速、五种页面配色、页面缩放、大鼠标、十字线、标准全屏、页面焦点橙色高亮、盲道区域高对比上下文框、六类盲道区域导航，以及标准选项卡与关联面板的键盘增强。
+`AccessibilityTool` 是一套面向桌面网站的原生 TypeScript 无障碍工具栏。它在接入页面显式调用后启动，提供朗读、语速、五种页面配色、页面缩放、大鼠标、十字线、标准全屏、页面焦点黄色轮廓、盲道活动区域深橙色轮廓、六类盲道区域导航，以及标准选项卡与关联面板的键盘增强。
 
 - 版本：`0.1.0`
 - 构建：TypeScript + Vite Library Mode + pnpm
@@ -64,6 +64,8 @@ await AccessibilityTool.open({ trigger: openButton });
     role="tab"
     aria-controls="panel-news"
     aria-selected="true"
+    data-a11y-activation="manual"
+    data-a11y-trigger-event="mouseover click"
   >新闻</button>
 </div>
 
@@ -74,7 +76,17 @@ await AccessibilityTool.open({ trigger: openButton });
 ></section>
 ```
 
-工具通过 `aria-controls` 和 ID 关联，不按 DOM 邻接关系猜测。每个有效选项都会进入原生 Tab 顺序，可使用 Tab/Shift+Tab 逐项切换，也保留方向键与 Home/End。自动模式在 Tab 聚焦时切换面板；手动模式需按 Enter 或空格。默认触发页面原有 `click` 事件完成视觉切换；可在 tablist 或单个 tab 上使用 `data-a11y-trigger-event="mouseover click"` 指定一个或多个原事件。
+普通关联面板和非原生浮层使用布尔属性 `data-a11y-hidden` 表示视觉隐藏，并由接入站点提供样式：
+
+```css
+[role="tabpanel"][data-a11y-hidden] {
+  display: none;
+}
+```
+
+工具通过 `aria-controls` 和 ID 关联，不按 DOM 邻接关系猜测。每个有效选项都会进入原生 Tab 顺序，可使用 Tab/Shift+Tab 逐项切换，也保留方向键与 Home/End。`data-a11y-activation` 和 `data-a11y-trigger-event` 只在对应的 `role="tab"` 选项节点上声明：自动模式在选项获得焦点时切换面板，手动模式需按 Enter 或空格。未声明或无效的激活模式回退到 `tabs.defaultActivation`；触发事件未声明或为空时回退到 `tabs.triggerEvents`，最终使用 `click`。多个事件使用空格分隔并自动去重，`role="tablist"` 只负责标准分组和方向语义。
+
+接入站点原有事件负责添加或移除 `data-a11y-hidden`，宿主 `role="tabpanel"` 不直接使用原生 `hidden`。工具不会控制业务面板的视觉显隐，只触发所配置的页面原事件并同步 `aria-selected` / `aria-hidden`；两类属性必须分别保留。原生 `<dialog>` 仍使用 `showModal()`、`open` 和 `close()`。
 
 ## 构建产物
 

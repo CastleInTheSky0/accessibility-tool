@@ -35,7 +35,7 @@
           if (active && !panel.open) panel.showModal();
           return;
         }
-        panel.hidden = !active;
+        panel.toggleAttribute("data-a11y-hidden", !active);
       });
     };
 
@@ -57,7 +57,7 @@
         return;
       }
       const panel = button.closest(".demo-floating-panel");
-      if (panel) panel.hidden = true;
+      if (panel) panel.setAttribute("data-a11y-hidden", "");
     });
   });
 

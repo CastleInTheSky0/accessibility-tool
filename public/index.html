@@ -85,20 +85,20 @@
           <div class="demo-split">
             <section class="tab-example" aria-labelledby="auto-tabs-label">
               <h3 id="auto-tabs-label">自动激活 / click</h3>
-              <div role="tablist" aria-label="产品栏目" data-a11y-trigger-event="click">
-                <button id="tab-overview" role="tab" aria-controls="panel-overview" aria-selected="true">概览</button>
-                <button id="tab-protocol" role="tab" aria-controls="panel-protocol" aria-selected="false">属性协议</button>
-                <button id="tab-keyboard" role="tab" aria-controls="panel-keyboard" aria-selected="false">键盘模型</button>
+              <div role="tablist" aria-label="产品栏目">
+                <button id="tab-overview" role="tab" aria-controls="panel-overview" aria-selected="true" data-a11y-activation="automatic" data-a11y-trigger-event="click">概览</button>
+                <button id="tab-protocol" role="tab" aria-controls="panel-protocol" aria-selected="false" data-a11y-activation="automatic" data-a11y-trigger-event="click">属性协议</button>
+                <button id="tab-keyboard" role="tab" aria-controls="panel-keyboard" aria-selected="false" data-a11y-activation="automatic" data-a11y-trigger-event="click">键盘模型</button>
               </div>
               <section id="panel-overview" role="tabpanel" aria-labelledby="tab-overview">
                 <p>Tab、Shift+Tab 或方向键移动焦点时触发页面已有的 click 事件；工具只补充焦点与 ARIA 状态。</p>
                 <a href="#dynamic-demo">继续查看动态页面</a>
               </section>
-              <section id="panel-protocol" role="tabpanel" aria-labelledby="tab-protocol" hidden>
+              <section id="panel-protocol" role="tabpanel" aria-labelledby="tab-protocol" data-a11y-hidden>
                 <p>推荐使用 <code>data-a11y-region</code> 与 <code>data-a11y-label</code>。</p>
                 <button type="button">面板内按钮</button>
               </section>
-              <section id="panel-keyboard" role="tabpanel" aria-labelledby="tab-keyboard" hidden>
+              <section id="panel-keyboard" role="tabpanel" aria-labelledby="tab-keyboard" data-a11y-hidden>
                 <p>在选项上按 Alt + 下方向键进入面板；面板内按 Esc 返回原选项。</p>
                 <label>测试输入 <input type="text" /></label>
               </section>
@@ -109,16 +109,14 @@
               <div
                 role="tablist"
                 aria-label="手动示例"
-                data-a11y-activation="manual"
-                data-a11y-trigger-event="mouseover"
               >
-                <button id="tab-manual-a" role="tab" aria-controls="panel-manual-a" aria-selected="true">方案 A</button>
-                <button id="tab-manual-b" role="tab" aria-controls="panel-manual-b" aria-selected="false">方案 B</button>
+                <button id="tab-manual-a" role="tab" aria-controls="panel-manual-a" aria-selected="true" data-a11y-activation="manual" data-a11y-trigger-event="mouseover">方案 A</button>
+                <button id="tab-manual-b" role="tab" aria-controls="panel-manual-b" aria-selected="false" data-a11y-activation="manual" data-a11y-trigger-event="mouseover">方案 B</button>
               </div>
               <section id="panel-manual-a" role="tabpanel" aria-labelledby="tab-manual-a">
                 <p>方向键只移动焦点，按 Enter 或空格后触发 mouseover。</p>
               </section>
-              <section id="panel-manual-b" role="tabpanel" aria-labelledby="tab-manual-b" hidden>
+              <section id="panel-manual-b" role="tabpanel" aria-labelledby="tab-manual-b" data-a11y-hidden>
                 <p>事件由示例站点处理，工具不直接改写面板显示样式。</p>
               </section>
             </section>
@@ -140,7 +138,7 @@
               class="demo-floating-panel"
               role="tabpanel"
               aria-labelledby="tab-floating"
-              hidden
+              data-a11y-hidden
             >
               <h4>非模态浮层</h4>
               <p>焦点可以正常离开；按 Esc 使用页面已有关闭按钮并回到原选项。</p>

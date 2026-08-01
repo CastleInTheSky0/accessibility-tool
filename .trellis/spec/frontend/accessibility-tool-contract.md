@@ -90,7 +90,7 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 - The active-region outline and `aria-regionactive="true"` move when another region is selected and clear when focus leaves the composed region tree, the region becomes invalid, or focus returns to the toolbar. Open Shadow Roots and same-origin iframe documents count as part of the composed region tree; cross-origin content remains atomic.
 - Focus and region owners preserve original inline outline values and `!important` priorities and restore them on focus change, region switch/exit, close, or destroy. When both own the region container, restore focus first and region second; rebuild region first and focus second.
 - Direct node outlines require no viewport geometry or scroll/resize repositioning and naturally follow open Shadow Root and same-origin iframe content. Captured scroll and relevant-window resize listeners continue only for the reading overlay.
-- Standard tabs require `role="tablist"`, `role="tab"`, and an `aria-controls` ID reference. Every valid option receives reversible `tabindex="0"`, so Tab/Shift+Tab traverse options in DOM order and leave the group naturally at either end. Automatic mode activates an option reached by Tab; manual mode waits for Enter/Space. Arrow keys, Home/End, Alt+Down panel entry, Escape return, configured original events, and reversible ARIA state remain supported.
+- Standard tabs require `role="tablist"`, `role="tab"`, and an `aria-controls` ID reference. Every valid option receives reversible `tabindex="0"`, so Tab/Shift+Tab traverse options in DOM order and leave the group naturally at either end. `data-a11y-activation` and `data-a11y-trigger-event` are read only from each corresponding `role="tab"`; values on `role="tablist"` are ignored. Missing/invalid activation falls back to `tabs.defaultActivation`; missing/empty trigger events fall back to `tabs.triggerEvents`, then `click`, with whitespace splitting and deduplication. Tab or arrow focus uses the target option's mode, while Enter/Space uses the current option's mode. `role="tablist"` remains responsible only for standard grouping and orientation. For ordinary host `role="tabpanel"` elements and non-native floating panels, host events own visual state through the boolean `data-a11y-hidden` attribute and host CSS `[role="tabpanel"][data-a11y-hidden] { display: none; }`; these panels must not directly use native `hidden`. The tool only dispatches configured host events and reversibly synchronizes `aria-selected` / `aria-hidden`, so visual and accessibility state remain separate. Native `<dialog>` continues to use `showModal()`, `open`, and `close()`. Alt+Down panel entry and Escape return remain supported.
 - `Alt+ArrowDown` enters the linked panel after it becomes visible; `Escape` returns to the originating tab. Only modal dialogs trap Tab.
 - Mutation observers batch page changes by `regions.mutationDebounceMs`; observers, reading listeners, pointer listeners, and shortcuts must be detached while closed.
 - Theme customization is limited to typed `toolbar.theme` variables. Arbitrary CSS injection is not part of the API.
@@ -133,7 +133,7 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 - Unit: accessible-name priority, control state text, hidden content, and Shadow Root `aria-labelledby`.
 - Unit: region source priority, numeric/English/legacy mapping, semantic-off mode, open Shadow Roots, safe history restoration, current-region wrap and reclassification recovery.
 - Unit: every visible recognized region receives a reversible Tab anchor; ordinary focus auto-activates the containing region; reading overlay, active-region owner, and current-focus owner remain independent; region focus is yellow, descendant focus restores the region to orange, and values/priorities restore exactly.
-- Unit: automatic/manual tabs, multiple original events, panel entry/Escape return, and non-modal dialog focus behavior.
+- Unit: per-option automatic/manual tabs, target-option focus activation, current-option Enter/Space activation, trigger-event fallback/deduplication, host-owned `data-a11y-hidden` panels without native `hidden`, panel entry/Escape return, and non-modal dialog focus behavior.
 - Unit: interrupted speech must not emit stale errors.
 - Unit: hidden features must be consistent between main and read-screen toolbars.
 - E2E: lazy open, fixed order, roving toolbar keyboard model, pin/collapse shortcut, zoom isolation, reset, and Fullscreen API.
@@ -155,6 +155,12 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 <!-- Relationship guessed from DOM order; no stable ID contract. -->
 <button role="tab">新闻</button>
 <section role="tabpanel">...</section>
+
+<!-- Per-option behavior incorrectly declared on the grouping container. -->
+<div role="tablist" data-a11y-activation="manual" data-a11y-trigger-event="mouseover"></div>
+
+<!-- Host tab panels must not use native hidden in this integration contract. -->
+<section role="tabpanel" hidden>...</section>
 ```
 
 ```js
@@ -177,15 +183,35 @@ for (const [index, item] of descendants.entries()) {
 ```html
 <nav data-a11y-region="navigation" data-a11y-label="主导航"></nav>
 
-<div role="tablist" data-a11y-trigger-event="click">
+<div role="tablist" aria-orientation="horizontal">
+  <button
+    id="tab-home"
+    role="tab"
+    aria-controls="panel-home"
+    aria-selected="true"
+    data-a11y-activation="automatic"
+    data-a11y-trigger-event="click"
+  >首页</button>
   <button
     id="tab-news"
     role="tab"
     aria-controls="panel-news"
-    aria-selected="true"
+    aria-selected="false"
+    data-a11y-activation="manual"
+    data-a11y-trigger-event="mouseover click"
   >新闻</button>
 </div>
-<section id="panel-news" role="tabpanel" aria-labelledby="tab-news">...</section>
+<section id="panel-home" role="tabpanel" aria-labelledby="tab-home">...</section>
+<section
+  id="panel-news"
+  role="tabpanel"
+  aria-labelledby="tab-news"
+  data-a11y-hidden
+>...</section>
+
+<style>
+  [role="tabpanel"][data-a11y-hidden] { display: none; }
+</style>
 ```
 
 ```js

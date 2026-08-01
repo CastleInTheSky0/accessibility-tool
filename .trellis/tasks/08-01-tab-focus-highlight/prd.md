@@ -22,6 +22,12 @@ When the accessibility tool is open, make focus and blind-path context easy to l
 - A visible non-native element with an explicit standalone interactive ARIA role (`button`, `link`, `checkbox`, `switch`, `slider`, `spinbutton`, `scrollbar`, `textbox`, `searchbox`, or `combobox`) may receive temporary `tabindex="0"` only when it has no author-provided `tabindex` and is not disabled or ignored.
 - Auto-focusability does not synthesize Enter/Space activation; the host widget remains responsible for the keyboard behavior required by its ARIA role.
 - Valid `role="tab"` options are managed by the tabs controller: every option remains in sequential Tab order, while arrow keys and Home/End remain available. Other composite-widget item roles such as `radio`, `menuitem`, `option`, and `treeitem` are not auto-tabbed because their owning widget must manage roving focus and keyboard behavior.
+- `data-a11y-activation` and `data-a11y-trigger-event` belong to each corresponding `role="tab"` option. The tabs controller does not inherit either custom attribute from `role="tablist"`; the tablist remains only the standard grouping and orientation container.
+- Missing or invalid per-option activation falls back to `tabs.defaultActivation`. Missing or empty per-option trigger events fall back to `tabs.triggerEvents`, then `click`; whitespace-separated events are deduplicated.
+- Tab and arrow navigation decide automatic activation from the target option, while Enter or Space decides manual activation from the currently focused option.
+- Ordinary host `role="tabpanel"` elements and configured non-native floating panels use the boolean `data-a11y-hidden` attribute for visual state, with host CSS `[role="tabpanel"][data-a11y-hidden] { display: none; }`; these host panels do not directly use native `hidden`.
+- Host-page original events own `data-a11y-hidden`. The accessibility tool only dispatches those events and reversibly synchronizes `aria-selected` / `aria-hidden`, so neither attribute replaces the other's responsibility.
+- Native `<dialog>` remains on its platform lifecycle through `showModal()`, `open`, and `close()`.
 - The implementation should resist host-page CSS conflicts by applying reversible `!important` outline styles directly to the real target node.
 - The indicator follows every host-page focus change, including Tab, Shift+Tab, blind-path navigation, programmatic focus, and mouse-initiated focus.
 - Current page focus uses yellow `#ffb800`; the active blind-path region uses deep orange `#ff6c00`.
@@ -49,6 +55,7 @@ When the accessibility tool is open, make focus and blind-path context easy to l
 - When focus leaves the region, the region is removed, or another region is selected, clear or move the region frame accordingly.
 - Repeated category navigation cycles through matching regions in page DOM order with wraparound.
 - Do not trap focus or add descendant `tabindex` values to manufacture a custom sequence.
+- Do not directly toggle the host panel's `data-a11y-hidden` or visual styles from the tabs controller.
 
 ## Acceptance Criteria (evolving)
 
@@ -74,6 +81,10 @@ When the accessibility tool is open, make focus and blind-path context easy to l
 - [x] Every valid tab option receives `tabindex="0"`; Tab and Shift+Tab move through options in DOM order without trapping focus at the ends.
 - [x] Tab focus activates the newly focused option in automatic mode, while manual mode waits for Enter or Space.
 - [x] Arrow keys and Home/End continue to navigate options, and Alt+Down/Escape continue to enter and leave the linked panel.
+- [x] Different options in one standard tablist can independently declare automatic/manual activation and original trigger events.
+- [x] Parent `role="tablist"` behavior attributes are ignored; per-option values and configuration/click fallbacks are covered by tests and documentation.
+- [x] Demo tab panels and the configured non-native floating panel use `data-a11y-hidden`, host event handlers own the toggle, and no host `[role="tabpanel"][hidden]` is introduced.
+- [x] `aria-hidden` remains tool-synchronized while `data-a11y-hidden` remains host-owned; native dialog behavior is unchanged.
 
 ## Definition of Done
 

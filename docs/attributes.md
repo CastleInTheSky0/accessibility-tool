@@ -68,22 +68,49 @@ AccessibilityTool.configure({
 标准关联必须使用 `aria-controls` 与 ID：
 
 ```html
-<div
-  role="tablist"
-  data-a11y-activation="manual"
-  data-a11y-trigger-event="mouseover click"
->
+<div role="tablist" aria-orientation="horizontal">
   <button
     id="tab-1"
     role="tab"
     aria-controls="panel-1"
-    data-a11y-trigger-event="click"
+    aria-selected="true"
+    data-a11y-activation="manual"
+    data-a11y-trigger-event="mouseover click"
   >选项一</button>
+  <button
+    id="tab-2"
+    role="tab"
+    aria-controls="panel-2"
+    aria-selected="false"
+    data-a11y-activation="manual"
+    data-a11y-trigger-event="mouseover click"
+  >选项二</button>
 </div>
 <section id="panel-1" role="tabpanel" aria-labelledby="tab-1"></section>
+<section
+  id="panel-2"
+  role="tabpanel"
+  aria-labelledby="tab-2"
+  data-a11y-hidden
+></section>
 ```
 
-事件优先级：选项节点 > tablist > 全局配置 > 默认 `click`。多个事件使用空格分隔并自动去重。
+接入站点必须为普通关联面板提供显隐样式：
+
+```css
+[role="tabpanel"][data-a11y-hidden] {
+  display: none;
+}
+```
+
+`data-a11y-activation` 与 `data-a11y-trigger-event` 只从各自的 `role="tab"` 选项节点读取，`role="tablist"` 仅用于标准分组和 `aria-orientation` 方向语义。
+
+- 激活模式未声明或不是 `automatic` / `manual` 时，回退到 `tabs.defaultActivation`。
+- 触发事件未声明或为空时，回退到 `tabs.triggerEvents`；配置仍为空时最终使用 `click`。
+- 多个事件使用空格分隔并自动去重，因此不同选项可以分别触发不同的页面原有事件。
+- 页面原有事件负责在普通 `role="tabpanel"` 或非原生浮层上添加、移除布尔属性 `data-a11y-hidden`，不要在这些宿主面板上直接使用原生 `hidden`。
+- 工具只触发页面原事件并同步 `aria-selected` / `aria-hidden`，不直接写入 `data-a11y-hidden` 或控制业务视觉样式；`aria-hidden` 不能替代显隐属性，`data-a11y-hidden` 也不能替代无障碍状态。
+- 原生 `<dialog>` 不使用 `data-a11y-hidden`，继续由页面通过 `showModal()`、`open` 和 `close()` 控制。
 
 ## 对话框关闭钩子
 

@@ -15,7 +15,6 @@ interface TabGroup {
   list: HTMLElement;
   tabs: HTMLElement[];
   panels: Map<HTMLElement, HTMLElement>;
-  activation: TabActivationMode;
   announced: boolean;
 }
 
@@ -175,18 +174,12 @@ export class TabsController {
       return null;
     }
     this.syncSelection({ tabs, panels }, selected);
-    const activationValue = list.getAttribute("data-a11y-activation");
-    const activation: TabActivationMode =
-      activationValue === "manual" || activationValue === "automatic"
-        ? activationValue
-        : this.config.tabs.defaultActivation;
 
     return {
       root,
       list,
       tabs,
       panels,
-      activation,
       announced: false,
     };
   }
@@ -245,7 +238,7 @@ export class TabsController {
     if (
       group &&
       reachedByTab &&
-      group.activation === "automatic" &&
+      this.resolveActivation(tab) === "automatic" &&
       tab.getAttribute("aria-selected") !== "true"
     ) {
       this.activateTab(group, tab);
@@ -318,7 +311,7 @@ export class TabsController {
     } else if (event.key === "End") {
       nextIndex = group.tabs.length - 1;
     } else if (
-      group.activation === "manual" &&
+      this.resolveActivation(tab) === "manual" &&
       (event.key === "Enter" || event.key === " ")
     ) {
       event.preventDefault();
@@ -334,13 +327,13 @@ export class TabsController {
       return;
     }
     nextTab.focus();
-    if (group.activation === "automatic") {
+    if (this.resolveActivation(nextTab) === "automatic") {
       this.activateTab(group, nextTab);
     }
   }
 
   private activateTab(group: TabGroup, tab: HTMLElement): void {
-    const events = this.resolveTriggerEvents(group, tab);
+    const events = this.resolveTriggerEvents(tab);
     for (const eventName of events) {
       this.dispatchOriginalEvent(tab, eventName);
     }
@@ -358,17 +351,21 @@ export class TabsController {
     });
   }
 
-  private resolveTriggerEvents(group: TabGroup, tab: HTMLElement): string[] {
-    const tabEvents = tab.getAttribute("data-a11y-trigger-event");
-    const listEvents = group.list.getAttribute("data-a11y-trigger-event");
+  private resolveActivation(tab: HTMLElement): TabActivationMode {
+    const value = tab.getAttribute("data-a11y-activation")?.trim();
+    return value === "manual" || value === "automatic"
+      ? value
+      : this.config.tabs.defaultActivation;
+  }
+
+  private resolveTriggerEvents(tab: HTMLElement): string[] {
+    const tabEvents = tab.getAttribute("data-a11y-trigger-event")?.trim();
     const configured = this.config.tabs.triggerEvents;
     const raw: readonly string[] = tabEvents
       ? [tabEvents]
-      : listEvents
-        ? [listEvents]
-        : typeof configured === "string"
-          ? [configured]
-          : configured;
+      : typeof configured === "string"
+        ? [configured]
+        : configured;
     const result = new Set<string>();
     for (const value of raw) {
       for (const eventName of value.split(/\s+/)) {

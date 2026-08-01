@@ -264,7 +264,7 @@ code {
   padding: 18px 4px;
 }
 
-[role="tabpanel"][hidden] {
+[role="tabpanel"][data-a11y-hidden] {
   display: none;
 }
 
