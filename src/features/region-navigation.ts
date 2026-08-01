@@ -1,6 +1,15 @@
-import { REGION_LABELS, REGION_TYPES } from "../core/constants";
+import {
+  REGION_LABELS,
+  REGION_TYPES,
+  TOOL_HOST_ATTRIBUTE,
+} from "../core/constants";
 import { DomLedger } from "../core/dom-ledger";
-import { isHTMLElement, isVisible } from "../core/dom";
+import {
+  isHTMLElement,
+  isTabbable,
+  isVisible,
+  querySelectorAllSafe,
+} from "../core/dom";
 import type { RegionChangeEvent, RegionType } from "../types";
 import type {
   RegionScanReason,
@@ -20,6 +29,19 @@ interface RegionNavigationCallbacks {
   onReturnToCategory: (type: RegionType) => void;
   onDynamicUpdate: () => void;
 }
+
+const AUTO_TABSTOP_ROLES = new Set([
+  "button",
+  "link",
+  "checkbox",
+  "switch",
+  "slider",
+  "spinbutton",
+  "scrollbar",
+  "textbox",
+  "searchbox",
+  "combobox",
+]);
 
 export class RegionNavigationController {
   private readonly ledger = new DomLedger();
@@ -47,7 +69,7 @@ export class RegionNavigationController {
     this.detachRootListeners();
     this.roots = [];
     this.clearActiveRegion();
-    this.restoreAllRegionTabStops();
+    this.restoreAllTabStops();
     this.resetPositions();
   }
 
@@ -61,7 +83,7 @@ export class RegionNavigationController {
     const previousIndex = this.currentIndex;
     this.regions = regions;
     this.setRoots(roots);
-    this.reconcileRegionTabStops();
+    this.reconcileTabStops();
     const counts = this.getCounts();
     this.callbacks.onCountsChange(counts);
 
@@ -296,23 +318,36 @@ export class RegionNavigationController {
     return match;
   }
 
-  private reconcileRegionTabStops(): void {
-    const currentElements = new Set(
+  private reconcileTabStops(): void {
+    const regionElements = new Set(
       this.regions
         .filter(
           (region) => region.element.isConnected && isVisible(region.element),
         )
         .map((region) => region.element),
     );
+    const currentElements = new Set(regionElements);
+
+    for (const root of this.roots) {
+      for (const element of querySelectorAllSafe<HTMLElement>(root, "[role]")) {
+        if (this.isAutoInteractiveTabStop(element)) {
+          currentElements.add(element);
+        }
+      }
+    }
 
     for (const element of this.tabIndexSnapshots.keys()) {
       if (!currentElements.has(element)) {
-        this.restoreRegionTabStop(element);
+        this.restoreTabStop(element);
       }
     }
 
     for (const element of currentElements) {
-      this.ensureRegionTabStop(element);
+      if (regionElements.has(element)) {
+        this.ensureRegionTabStop(element);
+      } else {
+        this.ensureInteractiveTabStop(element);
+      }
     }
   }
 
@@ -326,7 +361,44 @@ export class RegionNavigationController {
     element.setAttribute("tabindex", "0");
   }
 
-  private restoreRegionTabStop(element: HTMLElement): void {
+  private ensureInteractiveTabStop(element: HTMLElement): void {
+    if (this.tabIndexSnapshots.has(element)) {
+      const currentValue = element.getAttribute("tabindex");
+      if (currentValue === "0") {
+        return;
+      }
+      this.tabIndexSnapshots.delete(element);
+      if (currentValue !== null) {
+        return;
+      }
+    }
+    if (element.hasAttribute("tabindex") || isTabbable(element)) {
+      return;
+    }
+    this.tabIndexSnapshots.set(element, null);
+    element.setAttribute("tabindex", "0");
+  }
+
+  private isAutoInteractiveTabStop(element: HTMLElement): boolean {
+    const role = element
+      .getAttribute("role")
+      ?.trim()
+      .split(/\s+/)[0]
+      ?.toLowerCase();
+    return Boolean(
+      role &&
+        AUTO_TABSTOP_ROLES.has(role) &&
+        element.isConnected &&
+        isVisible(element) &&
+        !element.closest(
+          `[${TOOL_HOST_ATTRIBUTE}], [data-a11y-ignore]`,
+        ) &&
+        !element.hasAttribute("disabled") &&
+        element.getAttribute("aria-disabled")?.toLowerCase() !== "true",
+    );
+  }
+
+  private restoreTabStop(element: HTMLElement): void {
     if (!this.tabIndexSnapshots.has(element)) {
       return;
     }
@@ -339,9 +411,9 @@ export class RegionNavigationController {
     this.tabIndexSnapshots.delete(element);
   }
 
-  private restoreAllRegionTabStops(): void {
+  private restoreAllTabStops(): void {
     for (const element of Array.from(this.tabIndexSnapshots.keys())) {
-      this.restoreRegionTabStop(element);
+      this.restoreTabStop(element);
     }
   }
 

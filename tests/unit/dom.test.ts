@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   getAccessibleText,
   getElementLanguage,
+  getFocusableElements,
+  isTabbable,
   isVisible,
 } from "../../src/core/dom";
 
@@ -47,6 +49,34 @@ describe("DOM accessibility helpers", () => {
     const control = shadow.getElementById("shadow-control");
     expect(control).toBeInstanceOf(HTMLElement);
     expect(getAccessibleText(control as HTMLElement)).toBe("影子标题");
+  });
+
+  it("recognizes complete native Tab stops without including static content", () => {
+    document.body.innerHTML = `
+      <p id="paragraph">正文</p>
+      <span id="span">补充文字</span>
+      <img id="image" alt="示例图片">
+      <a id="link" href="#target">链接</a>
+      <button id="disabled-button" disabled>不可用</button>
+      <input id="hidden-input" type="hidden">
+      <details><summary id="summary">详情</summary><p>内容</p></details>
+      <audio id="audio" controls style="display:block"></audio>
+      <video id="video" controls></video>
+      <div id="editable" contenteditable="true">可编辑</div>
+      <div id="custom" tabindex="0">自定义焦点</div>
+      <div id="negative" tabindex="-1">仅程序聚焦</div>
+    `;
+
+    expect(getFocusableElements(document).map((element) => element.id)).toEqual([
+      "link",
+      "summary",
+      "audio",
+      "video",
+      "editable",
+      "custom",
+    ]);
+    expect(isTabbable(get("paragraph"))).toBe(false);
+    expect(isTabbable(get("negative"))).toBe(false);
   });
 });
 

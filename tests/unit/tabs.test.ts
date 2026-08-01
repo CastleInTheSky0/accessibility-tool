@@ -32,7 +32,7 @@ describe("TabsController", () => {
     controller.start([document]);
 
     expect(tabA.tabIndex).toBe(0);
-    expect(tabB.tabIndex).toBe(-1);
+    expect(tabB.tabIndex).toBe(0);
 
     tabA.focus();
     tabA.dispatchEvent(key("ArrowRight"));
@@ -51,6 +51,45 @@ describe("TabsController", () => {
 
     controller.stop();
     expect(tabA.hasAttribute("tabindex")).toBe(false);
+    expect(tabB.hasAttribute("tabindex")).toBe(false);
+  });
+
+  it("keeps every option in Tab order and auto-activates keyboard Tab focus", async () => {
+    document.body.innerHTML = `
+      <div role="tablist" aria-label="顺序切换">
+        <button id="tab-a" role="tab" aria-controls="panel-a" aria-selected="true">A</button>
+        <button id="tab-b" role="tab" aria-controls="panel-b" aria-selected="false">B</button>
+      </div>
+      <section id="panel-a" role="tabpanel">A panel</section>
+      <section id="panel-b" role="tabpanel" hidden>B panel</section>
+    `;
+    const tabA = get("tab-a");
+    const tabB = get("tab-b");
+    const panelA = get("panel-a");
+    const panelB = get("panel-b");
+    const clickListener = vi.fn((event: Event) => {
+      panelA.hidden = event.target !== tabA;
+      panelB.hidden = event.target !== tabB;
+    });
+    tabB.addEventListener("click", clickListener);
+    const controller = new TabsController(mergeConfig(DEFAULT_CONFIG), {
+      onAnnounce: vi.fn(),
+      onError: vi.fn(),
+    });
+    controller.start([document]);
+
+    expect(tabA.getAttribute("tabindex")).toBe("0");
+    expect(tabB.getAttribute("tabindex")).toBe("0");
+    tabA.focus();
+    tabA.dispatchEvent(key("Tab"));
+    tabB.focus();
+    await frame();
+
+    expect(document.activeElement).toBe(tabB);
+    expect(tabB.getAttribute("aria-selected")).toBe("true");
+    expect(panelB.hidden).toBe(false);
+    expect(clickListener).toHaveBeenCalledTimes(1);
+    controller.stop();
   });
 
   it("supports manual activation and multiple configured events", async () => {
@@ -74,6 +113,8 @@ describe("TabsController", () => {
       onError: vi.fn(),
     });
     controller.start([document]);
+    expect(tabA.getAttribute("tabindex")).toBe("0");
+    expect(tabB.getAttribute("tabindex")).toBe("0");
     tabA.focus();
     tabA.dispatchEvent(key("ArrowRight"));
     expect(document.activeElement).toBe(tabB);

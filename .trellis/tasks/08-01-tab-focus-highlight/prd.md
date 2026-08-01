@@ -16,8 +16,12 @@ When the accessibility tool is open, make focus and blind-path context easy to l
 ## Confirmed Product Decisions
 
 - "Page node" means focusable content in the host document, excluding controls rendered inside the accessibility toolbar.
-- The focus highlight supplements native focus behavior and must not change descendant `tabindex`, focus order, or activation behavior.
+- The focus highlight supplements native focus behavior and must not manufacture a readable-node focus order or change activation behavior.
 - Every visible recognized region container that is not already a native tab stop receives a temporary `tabindex="0"` while the tool is open. Ordinary Tab stops on the region before entering its descendants, and the prior value is restored when the region is no longer recognized or the tool closes.
+- Plain readable elements such as `p`, `span`, headings, list items, and `img` do not enter the Tab order merely because of their tag name. They remain available to reading and screen-reader browsing.
+- A visible non-native element with an explicit standalone interactive ARIA role (`button`, `link`, `checkbox`, `switch`, `slider`, `spinbutton`, `scrollbar`, `textbox`, `searchbox`, or `combobox`) may receive temporary `tabindex="0"` only when it has no author-provided `tabindex` and is not disabled or ignored.
+- Auto-focusability does not synthesize Enter/Space activation; the host widget remains responsible for the keyboard behavior required by its ARIA role.
+- Valid `role="tab"` options are managed by the tabs controller: every option remains in sequential Tab order, while arrow keys and Home/End remain available. Other composite-widget item roles such as `radio`, `menuitem`, `option`, and `treeitem` are not auto-tabbed because their owning widget must manage roving focus and keyboard behavior.
 - The implementation should resist host-page CSS conflicts by applying reversible `!important` outline styles directly to the real target node.
 - The indicator follows every host-page focus change, including Tab, Shift+Tab, blind-path navigation, programmatic focus, and mouse-initiated focus.
 - Current page focus uses yellow `#ffb800`; the active blind-path region uses deep orange `#ff6c00`.
@@ -32,7 +36,7 @@ When the accessibility tool is open, make focus and blind-path context easy to l
 - Follow both forward and reverse keyboard focus navigation.
 - Remove the previous indicator immediately when focus changes.
 - Remove all listeners and visual artifacts on close or destroy.
-- Do not mutate descendant focus order or activation semantics; only recognized region containers may temporarily become `tabindex="0"` navigation anchors.
+- Do not infer focusability from static tag names or rewrite an author-provided `tabindex`. Only recognized region containers and explicit standalone ARIA interactive nodes may temporarily become `tabindex="0"` navigation anchors.
 - Keep toolbar controls on their existing Shadow DOM focus treatment rather than drawing a second page-level indicator around them.
 - Let the indicator naturally follow the target node because it is applied directly to that node rather than positioned as a viewport overlay.
 - Hide the indicator when the focused element is disconnected, becomes non-rendered, or focus leaves the page content.
@@ -63,6 +67,13 @@ When the accessibility tool is open, make focus and blind-path context easy to l
 - [x] Selecting a blind-path region focuses the region container and shows only its yellow focus outline.
 - [x] Tab enters focusable descendants in native DOM order; the deep-orange region outline remains while the yellow focus outline follows the current descendant.
 - [x] Leaving the active region removes its frame without altering the page's native focus destination.
+- [x] Plain `p`, `span`, heading, list, label, and `img` nodes remain outside the Tab order unless the page explicitly makes them interactive.
+- [x] Explicit standalone ARIA controls without an author-provided `tabindex` receive temporary `tabindex="0"` and participate in native DOM-order Tab navigation.
+- [x] Author-provided `tabindex`, disabled/ignored nodes, and composite-widget item roles are not overridden.
+- [x] Auto-added ARIA-control tab stops are restored when the role becomes invalid, the node is hidden/removed, or the tool closes/destroys.
+- [x] Every valid tab option receives `tabindex="0"`; Tab and Shift+Tab move through options in DOM order without trapping focus at the ends.
+- [x] Tab focus activates the newly focused option in automatic mode, while manual mode waits for Enter or Space.
+- [x] Arrow keys and Home/End continue to navigate options, and Alt+Down/Escape continue to enter and leave the linked panel.
 
 ## Definition of Done
 

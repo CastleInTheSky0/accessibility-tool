@@ -4,6 +4,7 @@ import {
   createUniqueId,
   getFocusableElements,
   isHTMLElement,
+  isTabbable,
   isVisible,
   querySelectorAllSafe,
 } from "../core/dom";
@@ -30,6 +31,8 @@ export class TabsController {
   private roots: readonly (Document | ShadowRoot)[] = [];
   private running = false;
   private keyboardInput = false;
+  private tabNavigationPending = false;
+  private tabNavigationTimer: number | null = null;
   private activeDialog: HTMLElement | null = null;
   private dialogOrigin: HTMLElement | null = null;
 
@@ -58,6 +61,7 @@ export class TabsController {
     this.running = false;
     this.detachRoots();
     this.groups.clear();
+    this.setTabNavigationPending(false);
     this.activeDialog = null;
     this.dialogOrigin = null;
     this.modalLedger.restore();
@@ -207,6 +211,7 @@ export class TabsController {
 
   private readonly handlePointerDown = (): void => {
     this.keyboardInput = false;
+    this.setTabNavigationPending(false);
   };
 
   private readonly handleClick = (event: Event): void => {
@@ -227,6 +232,8 @@ export class TabsController {
 
   private readonly handleFocusIn = (event: Event): void => {
     const tab = getPathElement(event, '[role="tab"]');
+    const reachedByTab = this.tabNavigationPending;
+    this.setTabNavigationPending(false);
     if (!tab) {
       return;
     }
@@ -235,11 +242,25 @@ export class TabsController {
       group.announced = true;
       this.callbacks.onAnnounce("有关联内容面板，按 Alt+下方向键进入");
     }
+    if (
+      group &&
+      reachedByTab &&
+      group.activation === "automatic" &&
+      tab.getAttribute("aria-selected") !== "true"
+    ) {
+      this.activateTab(group, tab);
+    }
   };
 
   private readonly handleKeydown = (event: Event): void => {
     const keyboardEvent = event as KeyboardEvent;
     this.keyboardInput = true;
+    this.setTabNavigationPending(
+      keyboardEvent.key === "Tab" &&
+        !keyboardEvent.altKey &&
+        !keyboardEvent.ctrlKey &&
+        !keyboardEvent.metaKey,
+    );
 
     if (this.handleDialogFocusTrap(keyboardEvent)) {
       return;
@@ -312,7 +333,6 @@ export class TabsController {
     if (!nextTab) {
       return;
     }
-    this.setRovingTab(group, nextTab);
     nextTab.focus();
     if (group.activation === "automatic") {
       this.activateTab(group, nextTab);
@@ -397,17 +417,11 @@ export class TabsController {
     for (const tab of group.tabs) {
       const active = tab === selected;
       this.setAttribute(tab, "aria-selected", String(active));
-      this.setAttribute(tab, "tabindex", active ? "0" : "-1");
+      this.setAttribute(tab, "tabindex", "0");
       const panel = group.panels.get(tab);
       if (panel) {
         this.setAttribute(panel, "aria-hidden", String(!active));
       }
-    }
-  }
-
-  private setRovingTab(group: TabGroup, active: HTMLElement): void {
-    for (const tab of group.tabs) {
-      this.setAttribute(tab, "tabindex", tab === active ? "0" : "-1");
     }
   }
 
@@ -431,7 +445,7 @@ export class TabsController {
       );
       return;
     }
-    if (!isNaturallyFocusable(panel) && !panel.hasAttribute("tabindex")) {
+    if (!isTabbable(panel) && !panel.hasAttribute("tabindex")) {
       this.setAttribute(panel, "tabindex", "-1");
     }
     panel.focus();
@@ -590,6 +604,20 @@ export class TabsController {
     }
   }
 
+  private setTabNavigationPending(pending: boolean): void {
+    if (this.tabNavigationTimer !== null) {
+      window.clearTimeout(this.tabNavigationTimer);
+      this.tabNavigationTimer = null;
+    }
+    this.tabNavigationPending = pending;
+    if (pending) {
+      this.tabNavigationTimer = window.setTimeout(() => {
+        this.tabNavigationPending = false;
+        this.tabNavigationTimer = null;
+      }, 0);
+    }
+  }
+
   private markDiagnostic(list: HTMLElement, message: string): void {
     if (this.config.debug) {
       this.ledger.setAttribute(list, "data-a11y-tool-tab-error", message);
@@ -620,12 +648,6 @@ function getPathElement(event: Event, selector: string): HTMLElement | null {
   return element?.closest<HTMLElement>(selector) ?? null;
 }
 
-function isNaturallyFocusable(element: HTMLElement): boolean {
-  return (
-    element.tabIndex >= 0 ||
-    ["A", "BUTTON", "INPUT", "SELECT", "TEXTAREA"].includes(element.tagName)
-  );
-}
 
 async function waitUntilVisible(
   element: HTMLElement,

@@ -13,6 +13,11 @@ test.beforeEach(async ({ page }) => {
     fixture.innerHTML = `
       <button id="focus-first" type="button" style="outline-color:rgb(0 85 204)!important;outline-style:solid!important;outline-width:3px!important;outline-offset:2px!important">焦点目标一</button>
       <button id="focus-second" type="button">焦点目标二</button>
+      <p id="static-paragraph">普通正文</p>
+      <span id="custom-aria-button" role="button">自定义按钮</span>
+      <img id="static-image" alt="普通图片">
+      <a id="custom-aria-link" role="link">自定义链接</a>
+      <span id="explicit-negative-control" role="button" tabindex="-1">显式跳过</span>
     `;
     document.body.append(fixture);
   });
@@ -84,6 +89,58 @@ test("excludes toolbar controls and restores focus styles on close and destroy",
   await page.evaluate(() => window.AccessibilityTool.destroy());
   await expect(host).toHaveCount(0);
   expect(await snapshotInlineOutline(pageTarget)).toEqual(originalOutline);
+});
+
+test("auto-tabs explicit ARIA controls while skipping static content", async ({
+  page,
+}) => {
+  const host = page.locator("[data-a11y-tool-host]");
+  const second = page.locator("#focus-second");
+  const paragraph = page.locator("#static-paragraph");
+  const image = page.locator("#static-image");
+  const customButton = page.getByRole("button", { name: "自定义按钮" });
+  const customLink = page.getByRole("link", { name: "自定义链接" });
+  const explicitNegative = page.getByRole("button", { name: "显式跳过" });
+
+  await expect(paragraph).not.toHaveAttribute("tabindex", /.+/);
+  await expect(image).not.toHaveAttribute("tabindex", /.+/);
+  await expect(customButton).toHaveAttribute("tabindex", "0");
+  await expect(customLink).toHaveAttribute("tabindex", "0");
+  await expect(explicitNegative).toHaveAttribute("tabindex", "-1");
+
+  await second.focus();
+  await page.keyboard.press("Tab");
+  await expect(customButton).toBeFocused();
+  await expectOwnedOutline(customButton, FOCUS_COLOR);
+
+  await page.keyboard.press("Tab");
+  await expect(customLink).toBeFocused();
+  await expectOwnedOutline(customLink, FOCUS_COLOR);
+
+  await page.evaluate(() => {
+    const dynamic = document.createElement("span");
+    dynamic.id = "dynamic-aria-control";
+    dynamic.setAttribute("role", "button");
+    dynamic.textContent = "动态自定义按钮";
+    document.body.append(dynamic);
+  });
+  const dynamicControl = page.locator("#dynamic-aria-control");
+  await expect(dynamicControl).toHaveAttribute("tabindex", "0");
+  await dynamicControl.evaluate((element) =>
+    element.setAttribute("aria-disabled", "true"),
+  );
+  await expect(dynamicControl).not.toHaveAttribute("tabindex", /.+/);
+  await dynamicControl.evaluate((element) =>
+    element.setAttribute("aria-disabled", "false"),
+  );
+  await expect(dynamicControl).toHaveAttribute("tabindex", "0");
+  await dynamicControl.evaluate((element) => element.removeAttribute("role"));
+  await expect(dynamicControl).not.toHaveAttribute("tabindex", /.+/);
+
+  await host.locator('[data-mode="main"] [data-action="exit"]').click();
+  await expect(customButton).not.toHaveAttribute("tabindex", /.+/);
+  await expect(customLink).not.toHaveAttribute("tabindex", /.+/);
+  await expect(explicitNegative).toHaveAttribute("tabindex", "-1");
 });
 
 test("adds region anchors to ordinary Tab order and preserves native descendants", async ({

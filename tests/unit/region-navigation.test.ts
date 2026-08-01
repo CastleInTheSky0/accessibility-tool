@@ -171,6 +171,61 @@ describe("RegionNavigationController", () => {
     expect(second.getAttribute("tabindex")).toBe("-1");
     controller.stop();
   });
+
+  it("adds temporary tab stops only to standalone ARIA controls", () => {
+    document.body.innerHTML = `
+      <p id="paragraph">正文</p>
+      <span id="plain-span">普通文字</span>
+      <img id="plain-image" alt="普通图片">
+      <span id="aria-button" role="button">自定义按钮</span>
+      <a id="aria-link" role="link">自定义链接</a>
+      <img id="aria-image-button" role="button" alt="图片按钮">
+      <div id="aria-checkbox" role="checkbox" aria-checked="false">自定义复选框</div>
+      <div id="explicit-negative" role="button" tabindex="-1">显式跳过</div>
+      <div id="disabled-control" role="button" aria-disabled="true">不可用</div>
+      <div id="ignored-control" role="button" data-a11y-ignore>忽略</div>
+      <div id="composite-tab" role="tab">复合组件选项</div>
+      <button id="native-button" type="button">原生按钮</button>
+    `;
+    const controller = createController();
+    controller.start();
+    controller.update([], [document], "initial");
+
+    for (const id of [
+      "aria-button",
+      "aria-link",
+      "aria-image-button",
+      "aria-checkbox",
+    ]) {
+      expect(get(id).getAttribute("tabindex")).toBe("0");
+    }
+    for (const id of [
+      "paragraph",
+      "plain-span",
+      "plain-image",
+      "disabled-control",
+      "ignored-control",
+      "composite-tab",
+      "native-button",
+    ]) {
+      expect(get(id).hasAttribute("tabindex")).toBe(false);
+    }
+    expect(get("explicit-negative").getAttribute("tabindex")).toBe("-1");
+
+    get("aria-checkbox").setAttribute("tabindex", "-1");
+    controller.update([], [document], "mutation");
+    expect(get("aria-checkbox").getAttribute("tabindex")).toBe("-1");
+
+    get("aria-button").hidden = true;
+    get("aria-link").removeAttribute("role");
+    controller.update([], [document], "mutation");
+    expect(get("aria-button").hasAttribute("tabindex")).toBe(false);
+    expect(get("aria-link").hasAttribute("tabindex")).toBe(false);
+
+    controller.stop();
+    expect(get("aria-image-button").hasAttribute("tabindex")).toBe(false);
+    expect(get("aria-checkbox").getAttribute("tabindex")).toBe("-1");
+  });
 });
 
 function createController(

@@ -1,18 +1,22 @@
 import { TOOL_HOST_ATTRIBUTE } from "./constants";
 
-const FOCUSABLE_SELECTOR = [
+const NATIVE_TABSTOP_SELECTOR = [
   "a[href]",
   "area[href]",
   "button:not([disabled])",
   "input:not([disabled]):not([type='hidden'])",
   "select:not([disabled])",
   "textarea:not([disabled])",
+  "details > summary:first-of-type",
+  "audio[controls]",
+  "video[controls]",
   "iframe",
   "object",
   "embed",
-  "[contenteditable='true']",
-  "[tabindex]:not([tabindex='-1'])",
+  "[contenteditable]:not([contenteditable='false'])",
 ].join(",");
+
+const FOCUSABLE_SELECTOR = `${NATIVE_TABSTOP_SELECTOR},[tabindex]`;
 
 const READABLE_SELECTOR = [
   "h1",
@@ -86,9 +90,26 @@ export function isVisible(element: Element): boolean {
 }
 
 export function getFocusableElements(root: ParentNode): HTMLElement[] {
-  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
-    isVisible,
-  );
+  return Array.from(
+    root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+  ).filter(isTabbable);
+}
+
+export function isTabbable(element: HTMLElement): boolean {
+  if (
+    !isVisible(element) ||
+    element.hasAttribute("disabled") ||
+    (element.tagName === "INPUT" &&
+      element.getAttribute("type")?.toLowerCase() === "hidden")
+  ) {
+    return false;
+  }
+
+  if (element.hasAttribute("tabindex")) {
+    return element.tabIndex >= 0;
+  }
+
+  return element.matches(NATIVE_TABSTOP_SELECTOR);
 }
 
 export function getClosestReadableElement(

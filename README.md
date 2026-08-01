@@ -74,7 +74,7 @@ await AccessibilityTool.open({ trigger: openButton });
 ></section>
 ```
 
-工具通过 `aria-controls` 和 ID 关联，不按 DOM 邻接关系猜测。默认触发页面原有 `click` 事件完成视觉切换；可在 tablist 或单个 tab 上使用 `data-a11y-trigger-event="mouseover click"` 指定一个或多个原事件。
+工具通过 `aria-controls` 和 ID 关联，不按 DOM 邻接关系猜测。每个有效选项都会进入原生 Tab 顺序，可使用 Tab/Shift+Tab 逐项切换，也保留方向键与 Home/End。自动模式在 Tab 聚焦时切换面板；手动模式需按 Enter 或空格。默认触发页面原有 `click` 事件完成视觉切换；可在 tablist 或单个 tab 上使用 `data-a11y-trigger-event="mouseover click"` 指定一个或多个原事件。
 
 ## 构建产物
 
