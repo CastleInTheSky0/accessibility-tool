@@ -11,7 +11,11 @@ describe("RegionNavigationController", () => {
     const first = get("service-a");
     const last = get("service-b");
     const regions = [region(first), region(last)];
-    const controller = createController();
+    const setRegionHighlight = vi.fn();
+    const controller = createController({
+      setRegionHighlight,
+      clearRegionHighlight: vi.fn(),
+    });
     controller.start();
     controller.update(regions, [document], "initial");
     controller.navigate("service");
@@ -22,6 +26,7 @@ describe("RegionNavigationController", () => {
     controller.update([regions[0] as ScannedRegion], [document], "mutation");
 
     expect(document.activeElement).toBe(first);
+    expect(setRegionHighlight).toHaveBeenLastCalledWith(first);
     controller.stop();
   });
 
@@ -32,7 +37,11 @@ describe("RegionNavigationController", () => {
     `;
     const first = get("service-a");
     const second = get("service-b");
-    const controller = createController();
+    const setRegionHighlight = vi.fn();
+    const controller = createController({
+      setRegionHighlight,
+      clearRegionHighlight: vi.fn(),
+    });
     controller.start();
     controller.update([region(first), region(second)], [document], "initial");
     controller.navigate("service");
@@ -47,16 +56,47 @@ describe("RegionNavigationController", () => {
     );
 
     expect(document.activeElement).toBe(second);
+    expect(setRegionHighlight).toHaveBeenLastCalledWith(second);
+    controller.stop();
+  });
+
+  it("keeps the active region while focus traverses descendants", () => {
+    document.body.innerHTML = `
+      <nav id="service-a">
+        <a id="inside-a" href="#a">内部一</a>
+        <button id="inside-b">内部二</button>
+      </nav>
+      <button id="outside">外部</button>
+    `;
+    const activeRegion = get("service-a");
+    const clearRegionHighlight = vi.fn();
+    const controller = createController({
+      setRegionHighlight: vi.fn(),
+      clearRegionHighlight,
+    });
+    controller.start();
+    controller.update([region(activeRegion)], [document], "initial");
+    controller.navigate("service");
+    clearRegionHighlight.mockClear();
+
+    get("inside-a").focus();
+    get("inside-b").focus();
+    expect(clearRegionHighlight).not.toHaveBeenCalled();
+
+    get("outside").focus();
+    expect(clearRegionHighlight).toHaveBeenCalledTimes(1);
     controller.stop();
   });
 });
 
-function createController(): RegionNavigationController {
+function createController(
+  effects = {
+    setRegionHighlight: vi.fn(),
+    clearRegionHighlight: vi.fn(),
+  },
+): RegionNavigationController {
   return new RegionNavigationController(
-    {
-      setHighlight: vi.fn(),
-      clearHighlight: vi.fn(),
-    },
+    effects,
     {
       getToolbarOffset: () => 102,
       onCountsChange: vi.fn(),

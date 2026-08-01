@@ -1,6 +1,11 @@
 import type { ResolvedAccessibilityToolConfig } from "../core/config";
+import { TOOL_HOST_ATTRIBUTE } from "../core/constants";
 import { DomLedger } from "../core/dom-ledger";
-import { querySelectorAllSafe } from "../core/dom";
+import {
+  isHTMLElement,
+  isVisible,
+  querySelectorAllSafe,
+} from "../core/dom";
 import type { AccessibilityToolState } from "../types";
 import type { ToolbarUI } from "../ui/toolbar";
 
@@ -12,8 +17,16 @@ interface PageEffectsCallbacks {
 export class PageEffectsController {
   private readonly effectLedger = new DomLedger();
   private readonly placementLedger = new DomLedger();
+  private readonly focusPresentationLedger = new DomLedger();
   private state: AccessibilityToolState | null = null;
-  private highlightedElement: HTMLElement | null = null;
+  private readingHighlightedElement: HTMLElement | null = null;
+  private regionHighlightedElement: HTMLElement | null = null;
+  private focusedElement: HTMLElement | null = null;
+  private focusPresentationElement: HTMLElement | null = null;
+  private roots: (Document | ShadowRoot)[] = [document];
+  private readonly boundRoots = new Set<Document | ShadowRoot>();
+  private readonly boundWindows = new Set<Window>();
+  private focusSyncTimer: number | null = null;
   private crosshairBound = false;
   private started = false;
 
@@ -29,11 +42,25 @@ export class PageEffectsController {
     }
     this.started = true;
     document.addEventListener("fullscreenchange", this.handleFullscreenChange);
-    window.addEventListener("resize", this.repositionHighlight, { passive: true });
-    document.addEventListener("scroll", this.repositionHighlight, {
-      capture: true,
-      passive: true,
-    });
+    this.bindRootListeners();
+    this.synchronizeFocusHighlight();
+  }
+
+  setRoots(roots: readonly (Document | ShadowRoot)[]): void {
+    const nextRoots = Array.from(new Set([document, ...roots]));
+    const rootsChanged =
+      nextRoots.length !== this.roots.length ||
+      nextRoots.some((root, index) => root !== this.roots[index]);
+    if (rootsChanged) {
+      this.unbindRootListeners();
+      this.roots = nextRoots;
+      if (this.started) {
+        this.bindRootListeners();
+      }
+    }
+    if (this.started) {
+      this.synchronizeFocusHighlight();
+    }
   }
 
   updateConfig(config: ResolvedAccessibilityToolConfig): void {
@@ -90,6 +117,17 @@ export class PageEffectsController {
     this.effectLedger.restore();
     this.placementLedger.restore();
     this.clearHighlight();
+    this.clearRegionHighlight();
+    this.clearFocusHighlight();
+    this.cancelFocusSync();
+    this.unbindRootListeners();
+    if (this.started) {
+      document.removeEventListener(
+        "fullscreenchange",
+        this.handleFullscreenChange,
+      );
+    }
+    this.started = false;
     this.state = null;
   }
 
@@ -120,7 +158,7 @@ export class PageEffectsController {
   }
 
   setHighlight(element: HTMLElement | null): void {
-    this.highlightedElement = element;
+    this.readingHighlightedElement = element;
     if (element?.isConnected) {
       this.ui.positionHighlight(element);
     } else {
@@ -129,24 +167,50 @@ export class PageEffectsController {
   }
 
   clearHighlight(element?: HTMLElement): void {
-    if (element && this.highlightedElement !== element) {
+    if (element && this.readingHighlightedElement !== element) {
       return;
     }
-    this.highlightedElement = null;
+    this.readingHighlightedElement = null;
     this.ui.hideHighlight();
+  }
+
+  setRegionHighlight(element: HTMLElement | null): void {
+    if (!element) {
+      this.clearRegionHighlight();
+      return;
+    }
+    this.regionHighlightedElement = element;
+    if (element.isConnected && isVisible(element)) {
+      this.ui.positionRegionHighlight(element);
+    } else {
+      this.regionHighlightedElement = null;
+      this.ui.hideRegionHighlight();
+      return;
+    }
+    if (this.focusedElement === element) {
+      this.ui.hideFocusHighlight();
+    }
+  }
+
+  clearRegionHighlight(element?: HTMLElement): void {
+    if (element && this.regionHighlightedElement !== element) {
+      return;
+    }
+    const previousRegion = this.regionHighlightedElement;
+    this.regionHighlightedElement = null;
+    this.ui.hideRegionHighlight();
+    if (
+      previousRegion &&
+      this.focusedElement === previousRegion &&
+      this.isFocusHighlightTarget(previousRegion) &&
+      isElementCurrentlyFocused(previousRegion)
+    ) {
+      this.ui.positionFocusHighlight(previousRegion);
+    }
   }
 
   destroy(): void {
     this.deactivate();
-    if (this.started) {
-      document.removeEventListener(
-        "fullscreenchange",
-        this.handleFullscreenChange,
-      );
-      window.removeEventListener("resize", this.repositionHighlight);
-      document.removeEventListener("scroll", this.repositionHighlight, true);
-    }
-    this.started = false;
   }
 
   private applyPlacement(state: AccessibilityToolState): void {
@@ -259,13 +323,264 @@ export class PageEffectsController {
     );
   };
 
-  private readonly repositionHighlight = (): void => {
-    if (this.highlightedElement?.isConnected) {
-      this.ui.positionHighlight(this.highlightedElement);
+  private readonly handleFocusIn = (event: Event): void => {
+    this.cancelFocusSync();
+    if (this.ui.containsEvent(event)) {
+      this.clearFocusHighlight();
+      return;
+    }
+    const target = event
+      .composedPath()
+      .find((item): item is HTMLElement => isHTMLElement(item));
+    if (!target || !this.isFocusHighlightTarget(target)) {
+      this.clearFocusHighlight();
+      return;
+    }
+    this.presentFocusTarget(target);
+  };
+
+  private readonly handleFocusOut = (): void => {
+    this.scheduleFocusSync();
+  };
+
+  private readonly repositionHighlights = (): void => {
+    if (this.readingHighlightedElement?.isConnected) {
+      this.ui.positionHighlight(this.readingHighlightedElement);
+    } else if (this.readingHighlightedElement) {
+      this.clearHighlight();
+    }
+    if (
+      this.regionHighlightedElement?.isConnected &&
+      isVisible(this.regionHighlightedElement)
+    ) {
+      this.ui.positionRegionHighlight(this.regionHighlightedElement);
+    } else if (this.regionHighlightedElement) {
+      this.clearRegionHighlight();
+    }
+    if (
+      this.focusedElement &&
+      this.isFocusHighlightTarget(this.focusedElement) &&
+      isElementCurrentlyFocused(this.focusedElement)
+    ) {
+      this.presentFocusTarget(this.focusedElement);
+    } else if (this.focusedElement) {
+      this.clearFocusHighlight();
     }
   };
 
   private readonly handleFullscreenChange = (): void => {
     this.callbacks.onFullscreenChange(Boolean(document.fullscreenElement));
   };
+
+  private bindRootListeners(): void {
+    for (const root of this.roots) {
+      if (this.boundRoots.has(root)) {
+        continue;
+      }
+      root.addEventListener("focusin", this.handleFocusIn, true);
+      root.addEventListener("focusout", this.handleFocusOut, true);
+      root.addEventListener("scroll", this.repositionHighlights, {
+        capture: true,
+        passive: true,
+      });
+      this.boundRoots.add(root);
+
+      const view = getRootDocument(root).defaultView;
+      if (view && !this.boundWindows.has(view)) {
+        view.addEventListener("resize", this.repositionHighlights, {
+          passive: true,
+        });
+        this.boundWindows.add(view);
+      }
+    }
+  }
+
+  private unbindRootListeners(): void {
+    for (const root of this.boundRoots) {
+      root.removeEventListener("focusin", this.handleFocusIn, true);
+      root.removeEventListener("focusout", this.handleFocusOut, true);
+      root.removeEventListener("scroll", this.repositionHighlights, true);
+    }
+    this.boundRoots.clear();
+    for (const view of this.boundWindows) {
+      view.removeEventListener("resize", this.repositionHighlights);
+    }
+    this.boundWindows.clear();
+  }
+
+  private scheduleFocusSync(): void {
+    this.cancelFocusSync();
+    this.focusSyncTimer = window.setTimeout(() => {
+      this.focusSyncTimer = null;
+      this.synchronizeFocusHighlight();
+    }, 0);
+  }
+
+  private cancelFocusSync(): void {
+    if (this.focusSyncTimer !== null) {
+      window.clearTimeout(this.focusSyncTimer);
+      this.focusSyncTimer = null;
+    }
+  }
+
+  private synchronizeFocusHighlight(): void {
+    if (
+      this.focusedElement &&
+      this.isFocusHighlightTarget(this.focusedElement) &&
+      isElementCurrentlyFocused(this.focusedElement)
+    ) {
+      this.presentFocusTarget(this.focusedElement);
+      return;
+    }
+    const activeElement = this.findActivePageElement();
+    if (!activeElement) {
+      this.clearFocusHighlight();
+      return;
+    }
+    this.presentFocusTarget(activeElement);
+  }
+
+  private findActivePageElement(): HTMLElement | null {
+    for (const root of this.roots) {
+      const activeElement = getDeepActiveElement(root);
+      if (
+        activeElement &&
+        this.isFocusHighlightTarget(activeElement) &&
+        isElementCurrentlyFocused(activeElement)
+      ) {
+        return activeElement;
+      }
+    }
+    return null;
+  }
+
+  private isFocusHighlightTarget(element: HTMLElement): boolean {
+    return (
+      element !== element.ownerDocument.body &&
+      element !== element.ownerDocument.documentElement &&
+      !isInsideToolHost(element) &&
+      isVisible(element)
+    );
+  }
+
+  clearFocusHighlight(): void {
+    this.focusedElement = null;
+    this.ui.hideFocusHighlight();
+    this.releaseFocusPresentation();
+  }
+
+  private presentFocusTarget(element: HTMLElement): void {
+    this.focusedElement = element;
+    this.claimFocusPresentation(element);
+    if (element === this.regionHighlightedElement) {
+      this.ui.hideFocusHighlight();
+    } else {
+      this.ui.positionFocusHighlight(element);
+    }
+  }
+
+  private claimFocusPresentation(element: HTMLElement): void {
+    if (this.focusPresentationElement === element) {
+      return;
+    }
+    this.releaseFocusPresentation();
+    this.focusPresentationElement = element;
+    this.focusPresentationLedger.setAttribute(
+      element,
+      "data-a11y-page-focus-owned",
+      "",
+    );
+    const view = element.ownerDocument.defaultView;
+    if (view?.getComputedStyle(element).outlineStyle !== "none") {
+      this.focusPresentationLedger.setStyle(
+        element,
+        "outline-style",
+        "none",
+        "important",
+      );
+    }
+  }
+
+  private releaseFocusPresentation(): void {
+    this.focusPresentationLedger.restore();
+    this.focusPresentationElement = null;
+  }
+}
+
+function getRootDocument(root: Document | ShadowRoot): Document {
+  return root.nodeType === 9
+    ? (root as Document)
+    : (root.ownerDocument ?? document);
+}
+
+function getDeepActiveElement(
+  root: Document | ShadowRoot,
+): HTMLElement | null {
+  let activeElement: Element | null = root.activeElement;
+  while (activeElement) {
+    if (!isHTMLElement(activeElement)) {
+      return null;
+    }
+    const shadowActiveElement = activeElement.shadowRoot?.activeElement;
+    if (isHTMLElement(shadowActiveElement)) {
+      activeElement = shadowActiveElement;
+      continue;
+    }
+    if (activeElement.tagName === "IFRAME") {
+      try {
+        const frameActiveElement = (
+          activeElement as HTMLIFrameElement
+        ).contentDocument?.activeElement;
+        if (isHTMLElement(frameActiveElement)) {
+          activeElement = frameActiveElement;
+          continue;
+        }
+      } catch {
+        // Cross-origin frames stay atomic and are not inspected.
+      }
+    }
+    return activeElement as HTMLElement;
+  }
+  return null;
+}
+
+function isElementCurrentlyFocused(element: HTMLElement): boolean {
+  let current: Element = element;
+  while (true) {
+    const root = current.getRootNode();
+    if (root.nodeType === 9) {
+      const documentRef = root as Document;
+      if (documentRef.activeElement !== current) {
+        return false;
+      }
+      const frame = documentRef.defaultView?.frameElement;
+      if (!isHTMLElement(frame)) {
+        return true;
+      }
+      current = frame;
+      continue;
+    }
+    if (
+      "activeElement" in root &&
+      "host" in root &&
+      (root as ShadowRoot).activeElement === current
+    ) {
+      current = (root as ShadowRoot).host;
+      continue;
+    }
+    return false;
+  }
+}
+
+function isInsideToolHost(element: HTMLElement): boolean {
+  let current: HTMLElement | null = element;
+  while (current) {
+    if (current.closest(`[${TOOL_HOST_ATTRIBUTE}]`)) {
+      return true;
+    }
+    const root = current.getRootNode();
+    current =
+      "host" in root && isHTMLElement(root.host) ? root.host : null;
+  }
+  return false;
 }

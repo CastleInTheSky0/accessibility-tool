@@ -1,5 +1,9 @@
 type AttributeSnapshot = Map<string, string | null>;
-type StyleSnapshot = Map<string, string>;
+interface StyleValueSnapshot {
+  value: string;
+  priority: string;
+}
+type StyleSnapshot = Map<string, StyleValueSnapshot>;
 
 export class DomLedger {
   private readonly attributes = new Map<Element, AttributeSnapshot>();
@@ -26,13 +30,22 @@ export class DomLedger {
     element.removeAttribute(name);
   }
 
-  setStyle(element: HTMLElement, property: string, value: string): void {
-    const snapshot = this.styles.get(element) ?? new Map<string, string>();
+  setStyle(
+    element: HTMLElement,
+    property: string,
+    value: string,
+    priority = "",
+  ): void {
+    const snapshot =
+      this.styles.get(element) ?? new Map<string, StyleValueSnapshot>();
     if (!snapshot.has(property)) {
-      snapshot.set(property, element.style.getPropertyValue(property));
+      snapshot.set(property, {
+        value: element.style.getPropertyValue(property),
+        priority: element.style.getPropertyPriority(property),
+      });
       this.styles.set(element, snapshot);
     }
-    element.style.setProperty(property, value);
+    element.style.setProperty(property, value, priority);
   }
 
   addNode(node: Node): void {
@@ -51,9 +64,9 @@ export class DomLedger {
     }
 
     for (const [element, snapshot] of this.styles) {
-      for (const [property, value] of snapshot) {
-        if (value) {
-          element.style.setProperty(property, value);
+      for (const [property, style] of snapshot) {
+        if (style.value) {
+          element.style.setProperty(property, style.value, style.priority);
         } else {
           element.style.removeProperty(property);
         }

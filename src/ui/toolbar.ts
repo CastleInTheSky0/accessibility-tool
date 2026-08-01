@@ -18,6 +18,7 @@ interface ToolbarCallbacks {
   onAction: (action: ToolbarAction, control: HTMLElement) => void;
   onRateChange: (rate: number, control: HTMLElement) => void;
   onCollapsedChange: (collapsed: boolean) => void;
+  onFocusInside?: () => void;
 }
 
 const FEATURE_LABELS: Readonly<Record<FeatureId, string>> = {
@@ -88,6 +89,9 @@ const SWITCH_FEATURES = new Set<FeatureId>([
   "readScreen",
 ]);
 
+const FOCUS_OVERLAY_VIEWPORT_MARGIN = 6;
+const REGION_OVERLAY_VIEWPORT_MARGIN = 9;
+
 export class ToolbarUI {
   private readonly root: HTMLDivElement;
   private readonly toolbar: HTMLDivElement;
@@ -101,6 +105,8 @@ export class ToolbarUI {
   private readonly horizontalLine: HTMLDivElement;
   private readonly verticalLine: HTMLDivElement;
   private readonly highlight: HTMLDivElement;
+  private readonly regionHighlight: HTMLDivElement;
+  private readonly focusHighlight: HTMLDivElement;
   private readonly controls = new Map<ToolbarAction, HTMLElement>();
   private regionCounts: Record<RegionType, number> = {
     viewport: 0,
@@ -167,6 +173,8 @@ export class ToolbarUI {
     this.horizontalLine = this.createOverlay("a11y-crosshair a11y-crosshair--x");
     this.verticalLine = this.createOverlay("a11y-crosshair a11y-crosshair--y");
     this.highlight = this.createOverlay("a11y-highlight");
+    this.regionHighlight = this.createOverlay("a11y-region-highlight");
+    this.focusHighlight = this.createOverlay("a11y-focus-highlight");
 
     this.root.append(
       this.toolbar,
@@ -176,6 +184,8 @@ export class ToolbarUI {
       this.horizontalLine,
       this.verticalLine,
       this.highlight,
+      this.regionHighlight,
+      this.focusHighlight,
     );
     shadowRoot.append(this.root);
 
@@ -198,6 +208,8 @@ export class ToolbarUI {
     this.cancelCollapse();
     this.hideCrosshair();
     this.hideHighlight();
+    this.hideRegionHighlight();
+    this.hideFocusHighlight();
     this.root.hidden = true;
     this.host.hidden = true;
   }
@@ -382,20 +394,39 @@ export class ToolbarUI {
   }
 
   positionHighlight(element: HTMLElement): void {
-    const rect = getGlobalRect(element);
-    if (rect.width <= 0 && rect.height <= 0) {
-      this.hideHighlight();
-      return;
-    }
-    this.highlight.style.setProperty("--a11y-highlight-x", `${rect.left}px`);
-    this.highlight.style.setProperty("--a11y-highlight-y", `${rect.top}px`);
-    this.highlight.style.setProperty("--a11y-highlight-width", `${rect.width}px`);
-    this.highlight.style.setProperty("--a11y-highlight-height", `${rect.height}px`);
-    this.highlight.hidden = false;
+    this.positionElementOverlay(this.highlight, "highlight", element);
   }
 
   hideHighlight(): void {
     this.highlight.hidden = true;
+  }
+
+  positionRegionHighlight(element: HTMLElement): void {
+    this.positionElementOverlay(
+      this.regionHighlight,
+      "region-highlight",
+      element,
+      REGION_OVERLAY_VIEWPORT_MARGIN,
+      true,
+    );
+  }
+
+  hideRegionHighlight(): void {
+    this.regionHighlight.hidden = true;
+  }
+
+  positionFocusHighlight(element: HTMLElement): void {
+    this.positionElementOverlay(
+      this.focusHighlight,
+      "focus-highlight",
+      element,
+      FOCUS_OVERLAY_VIEWPORT_MARGIN,
+      true,
+    );
+  }
+
+  hideFocusHighlight(): void {
+    this.focusHighlight.hidden = true;
   }
 
   positionCrosshair(x: number, y: number): void {
@@ -411,7 +442,8 @@ export class ToolbarUI {
   }
 
   containsEvent(event: Event): boolean {
-    return event.composedPath().includes(this.root);
+    const path = event.composedPath();
+    return path.includes(this.root) || path.includes(this.host);
   }
 
   getToolbarHeight(): number {
@@ -579,6 +611,8 @@ export class ToolbarUI {
     });
     this.root.addEventListener("pointerleave", () => this.scheduleCollapse());
     this.root.addEventListener("focusin", () => {
+      this.hideFocusHighlight();
+      this.callbacks.onFocusInside?.();
       this.cancelCollapse();
       this.setCollapsed(false);
     });
@@ -748,6 +782,38 @@ export class ToolbarUI {
     return element;
   }
 
+  private positionElementOverlay(
+    overlay: HTMLDivElement,
+    variableName: "highlight" | "region-highlight" | "focus-highlight",
+    element: HTMLElement,
+    viewportMargin = 0,
+    requireArea = false,
+  ): void {
+    const globalRect = getGlobalRect(element);
+    const rect =
+      globalRect && viewportMargin > 0
+        ? getViewportIntersection(globalRect, viewportMargin)
+        : globalRect;
+    const hasNoArea = requireArea
+      ? rect && (rect.width <= 0 || rect.height <= 0)
+      : rect && rect.width <= 0 && rect.height <= 0;
+    if (!rect || hasNoArea) {
+      overlay.hidden = true;
+      return;
+    }
+    overlay.style.setProperty(`--a11y-${variableName}-x`, `${rect.left}px`);
+    overlay.style.setProperty(`--a11y-${variableName}-y`, `${rect.top}px`);
+    overlay.style.setProperty(
+      `--a11y-${variableName}-width`,
+      `${rect.width}px`,
+    );
+    overlay.style.setProperty(
+      `--a11y-${variableName}-height`,
+      `${rect.height}px`,
+    );
+    overlay.hidden = false;
+  }
+
   private findControls(action: ToolbarAction): HTMLElement[] {
     return Array.from(
       this.root.querySelectorAll<HTMLElement>(
@@ -769,21 +835,70 @@ function formatRate(rate: number): string {
   return Number(rate.toFixed(2)).toString();
 }
 
-function getGlobalRect(element: HTMLElement): DOMRect {
-  const local = element.getBoundingClientRect();
-  let left = local.left;
-  let top = local.top;
+function getGlobalRect(element: HTMLElement): DOMRect | null {
+  let rect: DOMRect | null = element.getBoundingClientRect();
   let view = element.ownerDocument.defaultView;
   try {
     while (isHTMLElement(view?.frameElement)) {
       const frame = view.frameElement;
       const frameRect = frame.getBoundingClientRect();
-      left += frameRect.left + frame.clientLeft;
-      top += frameRect.top + frame.clientTop;
+      const scaleX = frame.offsetWidth > 0
+        ? frameRect.width / frame.offsetWidth
+        : 1;
+      const scaleY = frame.offsetHeight > 0
+        ? frameRect.height / frame.offsetHeight
+        : 1;
+      const contentLeft = frameRect.left + frame.clientLeft * scaleX;
+      const contentTop = frameRect.top + frame.clientTop * scaleY;
+      rect = intersectRects(
+        new DOMRect(
+          contentLeft + rect.left * scaleX,
+          contentTop + rect.top * scaleY,
+          rect.width * scaleX,
+          rect.height * scaleY,
+        ),
+        new DOMRect(
+          contentLeft,
+          contentTop,
+          frame.clientWidth * scaleX,
+          frame.clientHeight * scaleY,
+        ),
+      );
+      if (!rect) {
+        return null;
+      }
       view = frame.ownerDocument.defaultView;
     }
   } catch {
     // The element remains highlightable inside the last same-origin boundary.
   }
-  return new DOMRect(left, top, local.width, local.height);
+  return rect;
+}
+
+function getViewportIntersection(
+  rect: DOMRect,
+  margin: number,
+): DOMRect | null {
+  const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+  const viewportHeight =
+    window.innerHeight || document.documentElement.clientHeight;
+  const left = Math.max(margin, rect.left);
+  const top = Math.max(margin, rect.top);
+  const right = Math.min(viewportWidth - margin, rect.right);
+  const bottom = Math.min(viewportHeight - margin, rect.bottom);
+  if (right <= left || bottom <= top) {
+    return null;
+  }
+  return new DOMRect(left, top, right - left, bottom - top);
+}
+
+function intersectRects(first: DOMRect, second: DOMRect): DOMRect | null {
+  const left = Math.max(first.left, second.left);
+  const top = Math.max(first.top, second.top);
+  const right = Math.min(first.right, second.right);
+  const bottom = Math.min(first.bottom, second.bottom);
+  if (right <= left || bottom <= top) {
+    return null;
+  }
+  return new DOMRect(left, top, right - left, bottom - top);
 }

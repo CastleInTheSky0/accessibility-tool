@@ -233,6 +233,10 @@ class AccessibilityToolRuntime implements AccessibilityToolApi {
       },
       onRateChange: (rate) => this.setSpeechRate(rate),
       onCollapsedChange: (collapsed) => this.handleCollapsedChange(collapsed),
+      onFocusInside: () => {
+        this.effects?.clearFocusHighlight();
+        this.regionNavigation?.clearActiveRegion();
+      },
     });
     this.speech = new SpeechController(
       this.activeConfig.speech.adapter,
@@ -272,6 +276,7 @@ class AccessibilityToolRuntime implements AccessibilityToolApi {
     });
     this.scanner = new RegionScanner(this.activeConfig, {
       onUpdate: (regions, roots, reason) => {
+        this.effects?.setRoots(roots);
         this.reading?.setRoots(roots);
         this.regionNavigation?.update(regions, roots, reason);
         this.bindShortcutDocuments(

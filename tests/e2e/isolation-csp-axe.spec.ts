@@ -31,6 +31,12 @@ test("loads the toolbar under strict external-style CSP", async ({ page }) => {
   await page.goto("/demos/csp.html?debug=1");
   await page.getByRole("button", { name: "打开工具" }).click();
   await expect(page.getByRole("toolbar", { name: "无障碍工具栏" })).toBeVisible();
+  const target = page.getByRole("link", { name: "返回完整演示" });
+  await target.focus();
+  await expect(target).toHaveCSS("outline-style", "none");
+  await expect(
+    page.locator("[data-a11y-tool-host] .a11y-focus-highlight"),
+  ).toBeVisible();
   expect(errors.filter((message) => message.includes("Content Security Policy"))).toEqual([]);
 });
 

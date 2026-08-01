@@ -8,8 +8,8 @@ import type {
 } from "./regions";
 
 interface RegionHighlightController {
-  setHighlight(element: HTMLElement | null): void;
-  clearHighlight(element?: HTMLElement): void;
+  setRegionHighlight(element: HTMLElement | null): void;
+  clearRegionHighlight(element?: HTMLElement): void;
 }
 
 interface RegionNavigationCallbacks {
@@ -45,9 +45,7 @@ export class RegionNavigationController {
     this.started = false;
     this.detachRootListeners();
     this.roots = [];
-    this.current = null;
-    this.currentIndex = -1;
-    this.effects.clearHighlight();
+    this.clearActiveRegion();
     this.ledger.restore();
     this.resetPositions();
   }
@@ -84,6 +82,7 @@ export class RegionNavigationController {
       this.currentIndex = sameType.findIndex(
         (region) => region.element === previousCurrent.element,
       );
+      this.effects.setRegionHighlight(previousCurrent.element);
     }
 
     if (
@@ -98,6 +97,12 @@ export class RegionNavigationController {
     for (const type of REGION_TYPES) {
       this.lastIndexes.set(type, -1);
     }
+  }
+
+  clearActiveRegion(): void {
+    this.current = null;
+    this.currentIndex = -1;
+    this.effects.clearRegionHighlight();
   }
 
   navigate(type: RegionType): boolean {
@@ -167,7 +172,7 @@ export class RegionNavigationController {
     this.current = region;
     this.currentIndex = index;
     this.lastIndexes.set(region.type, index);
-    this.effects.setHighlight(element);
+    this.effects.setRegionHighlight(element);
 
     const message = `${region.label}，${REGION_LABELS[region.type]}，第 ${index + 1} 个，共 ${count} 个`;
     this.callbacks.onAnnounce(message);
@@ -180,7 +185,7 @@ export class RegionNavigationController {
     });
     requestAnimationFrame(() => {
       if (this.current?.element === element && element.isConnected) {
-        this.effects.setHighlight(element);
+        this.effects.setRegionHighlight(element);
       }
     });
   }
@@ -188,9 +193,7 @@ export class RegionNavigationController {
   private recoverRemovedRegion(type: RegionType, previousIndex: number): void {
     const regions = this.getRegions(type);
     if (regions.length === 0) {
-      this.current = null;
-      this.currentIndex = -1;
-      this.effects.clearHighlight();
+      this.clearActiveRegion();
       this.lastIndexes.set(type, -1);
       this.callbacks.onReturnToCategory(type);
       return;
@@ -231,10 +234,8 @@ export class RegionNavigationController {
     const path = event.composedPath();
     if (!path.includes(this.current.element)) {
       const target = path.find((item): item is HTMLElement => isHTMLElement(item));
-      if (!target || !this.current.element.contains(target)) {
-        this.current = null;
-        this.currentIndex = -1;
-        this.effects.clearHighlight();
+      if (!target || !isComposedDescendant(this.current.element, target)) {
+        this.clearActiveRegion();
       }
     }
   };
@@ -259,4 +260,32 @@ function isNaturallyFocusable(element: HTMLElement): boolean {
     (element.tagName === "A" || element.tagName === "AREA") &&
     element.hasAttribute("href")
   );
+}
+
+function isComposedDescendant(
+  container: HTMLElement,
+  target: HTMLElement,
+): boolean {
+  let current: HTMLElement | null = target;
+  while (current) {
+    if (current === container || container.contains(current)) {
+      return true;
+    }
+    const root = current.getRootNode();
+    if ("host" in root && isHTMLElement(root.host)) {
+      current = root.host;
+      continue;
+    }
+    if (root.nodeType === 9) {
+      try {
+        const frame = (root as Document).defaultView?.frameElement;
+        current = isHTMLElement(frame) ? frame : null;
+        continue;
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+  return false;
 }
