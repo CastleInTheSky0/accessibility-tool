@@ -352,9 +352,7 @@ $overlay-z: 2147483645;
 }
 
 .a11y-crosshair,
-.a11y-highlight,
-.a11y-region-highlight,
-.a11y-focus-highlight {
+.a11y-highlight {
   pointer-events: none !important;
   position: fixed !important;
   z-index: $overlay-z !important;
@@ -393,37 +391,6 @@ $overlay-z: 2147483645;
   left: var(--a11y-highlight-x, 0);
   top: var(--a11y-highlight-y, 0);
   width: var(--a11y-highlight-width, 0);
-}
-
-.a11y-region-highlight {
-  border: 4px solid #00e5ff;
-  border-radius: 8px;
-  box-shadow:
-    0 0 0 2px #000,
-    0 0 0 5px #fff,
-    0 0 0 7px #00e5ff,
-    0 0 22px rgb(0 229 255 / 68%);
-  height: var(--a11y-region-highlight-height, 0);
-  left: var(--a11y-region-highlight-x, 0);
-  top: var(--a11y-region-highlight-y, 0);
-  width: var(--a11y-region-highlight-width, 0);
-}
-
-.a11y-focus-highlight {
-  border: 4px solid var(--a11y-accent);
-  border-radius: 6px;
-  box-shadow:
-    0 0 0 2px rgb(255 255 255 / 96%),
-    0 0 0 4px rgb(17 17 17 / 92%),
-    0 0 20px rgb(255 122 0 / 60%);
-  height: var(--a11y-focus-highlight-height, 0);
-  left: var(--a11y-focus-highlight-x, 0);
-  top: var(--a11y-focus-highlight-y, 0);
-  width: var(--a11y-focus-highlight-width, 0);
-}
-
-[data-a11y-page-focus-owned] {
-  outline: none !important;
 }
 
 html[data-a11y-color-scheme="white-black"] {
@@ -498,9 +465,7 @@ html[data-a11y-large-cursor]
 @media (prefers-reduced-motion: reduce) {
   .a11y-toolbar,
   .a11y-control,
-  .a11y-highlight,
-  .a11y-region-highlight,
-  .a11y-focus-highlight {
+  .a11y-highlight {
     scroll-behavior: auto !important;
     transition: none !important;
   }
@@ -514,28 +479,14 @@ html[data-a11y-large-cursor]
     forced-color-adjust: auto;
   }
 
-  .a11y-highlight,
-  .a11y-region-highlight,
-  .a11y-focus-highlight {
+  .a11y-highlight {
     background: transparent;
     forced-color-adjust: none;
-  }
-
-  .a11y-highlight,
-  .a11y-focus-highlight {
     border-color: Highlight;
     border-style: solid;
     box-shadow:
       0 0 0 2px Canvas,
       0 0 0 4px CanvasText;
-  }
-
-  .a11y-region-highlight {
-    border-color: CanvasText;
-    border-style: double;
-    box-shadow:
-      0 0 0 2px Canvas,
-      0 0 0 5px Highlight;
   }
 
   .a11y-crosshair {

@@ -2,7 +2,7 @@
 
 ## Goal
 
-When the accessibility tool is open, make focus and blind-path context easy to locate with two coordinated, isolated indicators: an orange indicator for the current page focus and a distinct high-contrast indicator that remains around the active blind-path region while focus moves through its descendants.
+When the accessibility tool is open, make focus and blind-path context easy to locate using the interaction verified on the 常山县政府阅读辅助 product: a yellow outline on the real currently focused page node and a deep-orange outline on the real active blind-path region while focus moves through its descendants.
 
 ## What I already know
 
@@ -11,51 +11,58 @@ When the accessibility tool is open, make focus and blind-path context easy to l
 - The currently focused page node receives the highlight; the previous node loses it.
 - The project already isolates toolbar styles in a Shadow Root and must clean up page-side effects on close or destroy.
 - The toolbar already has its own orange focus treatment.
-- Reading and blind-path navigation share an existing `.a11y-highlight` overlay, so the persistent focus indicator needs an independent overlay to avoid being cleared when speech ends or region navigation resets.
+- Reading retains the existing `.a11y-highlight` overlay; focus and blind-path context need independent node-owned outline state so speech cleanup cannot clear them.
 
 ## Confirmed Product Decisions
 
 - "Page node" means focusable content in the host document, excluding controls rendered inside the accessibility toolbar.
-- The orange highlight supplements native focus behavior and must not change `tabindex`, focus order, or activation behavior.
-- The implementation should resist host-page CSS conflicts and remain visible near viewport edges.
+- The focus highlight supplements native focus behavior and must not change descendant `tabindex`, focus order, or activation behavior.
+- Every visible recognized region container that is not already a native tab stop receives a temporary `tabindex="0"` while the tool is open. Ordinary Tab stops on the region before entering its descendants, and the prior value is restored when the region is no longer recognized or the tool closes.
+- The implementation should resist host-page CSS conflicts by applying reversible `!important` outline styles directly to the real target node.
 - The indicator follows every host-page focus change, including Tab, Shift+Tab, blind-path navigation, programmatic focus, and mouse-initiated focus.
-- The active blind-path region uses a separate cyan/black/white high-contrast frame so it is visually distinct from the orange current-focus frame.
-- When the region container itself first receives focus, show only the region frame; after Tab enters a descendant, keep the region frame and show the orange frame around the descendant.
-- The blue-and-orange double frame currently seen on the demo is the host page's native blue `:focus-visible` outline plus the tool's orange overlay. While the tool owns the isolated focus indicator, the host outline must be suppressed reversibly so only one current-focus color is shown.
+- Current page focus uses yellow `#ffb800`; the active blind-path region uses deep orange `#ff6c00`.
+- When the region container itself first receives focus, show only the yellow focus outline; after Tab enters a descendant, show the deep-orange outline on the region and the yellow outline on the descendant.
+- The blue-and-orange double frame currently seen on the demo is the host page's native blue `:focus-visible` outline plus the old product overlay. Direct reversible ownership of the node outline must leave only the yellow current-focus color visible.
 
 ## Requirements (evolving)
 
 - Track focus changes while the tool is open.
 - Respond to all host-page focus sources rather than trying to infer the input modality.
-- Show an orange visual indicator around the currently focused host-page element.
+- Show a yellow `#ffb800` visual indicator around the currently focused host-page element.
 - Follow both forward and reverse keyboard focus navigation.
 - Remove the previous indicator immediately when focus changes.
 - Remove all listeners and visual artifacts on close or destroy.
-- Do not mutate host-page focus order or activation semantics.
+- Do not mutate descendant focus order or activation semantics; only recognized region containers may temporarily become `tabindex="0"` navigation anchors.
 - Keep toolbar controls on their existing Shadow DOM focus treatment rather than drawing a second page-level indicator around them.
-- Reposition the indicator when the focused element moves because of scrolling or viewport resizing.
+- Let the indicator naturally follow the target node because it is applied directly to that node rather than positioned as a viewport overlay.
 - Hide the indicator when the focused element is disconnected, becomes non-rendered, or focus leaves the page content.
-- Give blind-path regions an overlay independent from both current focus and reading highlights.
-- Selecting a blind-path category focuses the selected region and shows its high-contrast region frame.
+- Give blind-path regions a node-owned outline state independent from both current focus and reading highlights.
+- Recognized regions are automatically inserted into the native Tab sequence in DOM order while the tool is open.
+- Focusing a recognized region through ordinary Tab automatically makes it the active region; the next Tab enters its native focusable descendants.
+- Selecting a blind-path category focuses the already-tab-enabled selected region.
 - Pressing Tab from the focused region follows the browser's native DOM order into focusable descendants; Shift+Tab follows the native reverse order.
-- While focus remains inside the selected region, keep the outer region frame visible and move only the orange current-focus frame.
+- While focus remains inside the selected region, keep the deep-orange outer outline visible and move only the yellow current-focus outline.
 - When focus leaves the region, the region is removed, or another region is selected, clear or move the region frame accordingly.
+- Repeated category navigation cycles through matching regions in page DOM order with wraparound.
 - Do not trap focus or add descendant `tabindex` values to manufacture a custom sequence.
 
 ## Acceptance Criteria (evolving)
 
-- [ ] Opening the tool enables host-page focus highlighting.
-- [ ] Pressing Tab moves focus normally and highlights only the newly focused page element.
-- [ ] Pressing Shift+Tab updates the highlight in reverse focus order.
-- [ ] Programmatic focus and mouse-initiated focus update the same indicator.
-- [ ] The highlight is orange and clearly visible without changing layout.
-- [ ] The focused page node shows a single orange focus treatment rather than the host page's blue outline plus the orange overlay.
-- [ ] Toolbar-internal controls retain their existing focus treatment.
-- [ ] Closing or destroying the tool removes the indicator and related listeners.
-- [ ] Unit and browser tests cover activation, focus movement, exclusion, and cleanup.
-- [ ] Selecting a blind-path region shows only a distinct high-contrast region frame around the region container.
-- [ ] Tab enters focusable descendants in native DOM order; the region frame remains while the orange frame follows the current descendant.
-- [ ] Leaving the active region removes its frame without altering the page's native focus destination.
+- [x] Opening the tool enables host-page focus highlighting.
+- [x] Pressing Tab moves focus normally and highlights only the newly focused page element.
+- [x] Pressing Shift+Tab updates the highlight in reverse focus order.
+- [x] Programmatic focus and mouse-initiated focus update the same indicator.
+- [x] The focus highlight is yellow `#ffb800` and clearly visible without changing layout.
+- [x] The focused page node shows a single yellow focus treatment rather than the host page's blue outline plus a second product frame.
+- [x] Toolbar-internal controls retain their existing focus treatment.
+- [x] Closing or destroying the tool removes the indicator and related listeners.
+- [x] Unit and browser tests cover activation, focus movement, exclusion, and cleanup.
+- [x] Repeated selection of one category cycles through its regions in DOM order and wraps to the first region.
+- [x] Ordinary Tab stops on each recognized region container in DOM order before visiting focusable descendants inside that region.
+- [x] A region reached through ordinary Tab becomes active without requiring a category button or shortcut first.
+- [x] Selecting a blind-path region focuses the region container and shows only its yellow focus outline.
+- [x] Tab enters focusable descendants in native DOM order; the deep-orange region outline remains while the yellow focus outline follows the current descendant.
+- [x] Leaving the active region removes its frame without altering the page's native focus destination.
 
 ## Definition of Done
 
@@ -65,7 +72,7 @@ When the accessibility tool is open, make focus and blind-path context easy to l
 
 ## Out of Scope
 
-- Changing native tab order or adding focusability to otherwise non-focusable nodes.
+- Changing descendant tab order or adding focusability to non-region descendant nodes.
 - Mouse-hover highlighting.
 - Mobile-specific focus presentation.
 - A user-facing color or thickness setting in this version.
@@ -74,23 +81,24 @@ When the accessibility tool is open, make focus and blind-path context easy to l
 ## Technical Notes
 
 - Likely touchpoints: `src/features/page-effects.ts`, `src/ui/toolbar.ts`, `src/styles/accessibility-tool.scss`, and unit/E2E coverage.
-- Add dedicated fixed-position, pointer-transparent focus and region overlays inside the existing closed Shadow Root. This avoids host layout changes and host CSS conflicts while reusing the current global-rectangle handling for same-origin nested contexts.
-- Keep reading, active-region, and current-focus overlays as separate responsibilities so one lifecycle cannot clear or reposition another.
-- Temporarily activate a document-level focus-outline suppression rule only while the tool's page-focus indicator is active; remove it during close/destroy so the host page's original focus presentation returns unchanged.
-- The focus path is: host-page focus event -> page effects lifecycle -> toolbar overlay position -> isolated SCSS presentation.
-- Future configurability of focus color/thickness is intentionally deferred; the MVP uses the existing theme accent and a fixed accessible treatment.
+- Keep the reading overlay in the existing closed Shadow Root, but apply focus and active-region outlines directly to the real host-page nodes with reversible inline `!important` styles.
+- Keep reading, active-region, and current-focus state as separate responsibilities so one lifecycle cannot clear another.
+- Use separate ledgers for current focus and active region so original inline outline values, priorities, state attributes, and temporary `tabindex` values are restored exactly.
+- The focus path is: host-page focus event -> page-effects lifecycle -> reversible outline ownership on the real node.
+- The region path is: scanner update -> reconcile temporary `tabindex="0"` across visible recognized regions -> native Tab or category navigation -> region state coordination.
+- Future configurability of focus color/thickness is intentionally deferred; this version uses the verified yellow/deep-orange pair.
 
 ## Decision (ADR-lite, provisional)
 
 **Context**: Host-page focus rules can either suppress the tool or produce duplicate blue/orange frames, while sharing one overlay among reading, blind-path context, and current focus creates lifecycle conflicts.
 
-**Decision**: Use independent reading, active-region, and current-focus overlays owned by the toolbar Shadow Root. The active region uses a cyan high-contrast treatment; current focus uses orange; the host outline is reversibly suppressed while the tool's focus overlay is active.
+**Decision**: Keep only the reading target as a toolbar-owned overlay. Apply independent active-region and current-focus outline states directly to the real page nodes. The active region uses deep orange `#ff6c00`; current focus uses yellow `#ffb800`; all page-side mutations are ledger-owned and reversible.
 
-**Consequences**: The indicators are isolated and do not shift layout, but they must be repositioned on focus, scroll, and resize, coordinate when the region itself has focus, and be explicitly hidden during teardown.
+**Consequences**: The indicators do not shift layout and naturally follow complex node geometry, scrolling, open Shadow Roots, and same-origin iframe contents. Inline `!important` ownership must restore exact host values on focus change, region switch, close, and destroy, and the two states must coordinate when the region itself is focused.
 
 ## Implementation Plan
 
-1. Add dedicated focus and active-region overlays and positioning APIs to the isolated toolbar UI.
-2. Split blind-path highlighting from the existing reading highlight and bind host-page focus tracking through the page-effects lifecycle.
-3. Preserve native Tab order through region descendants, coordinate the two visible layers, and suppress duplicate host outlines reversibly.
-4. Add unit and browser coverage for focus sources, region entry/exit, toolbar exclusion, movement, and cleanup.
+1. Replace the focus and active-region fixed overlays with separate reversible outline owners on real nodes; retain the reading overlay.
+2. Reconcile temporary `tabindex="0"` across every visible recognized region, auto-activate regions reached through ordinary Tab, preserve category cycling, and coordinate region/self/descendant focus colors.
+3. Restore all page-side styles and attributes when a region disappears, configuration changes, the tool closes, or it is destroyed without touching descendant tab order.
+4. Update unit and browser coverage for ordinary Tab entry, focus sources, region cycling, entry/exit, dynamic regions, toolbar exclusion, Shadow DOM/iframe behavior, and cleanup.

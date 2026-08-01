@@ -23,31 +23,26 @@ describe("PageEffectsController focus highlighting", () => {
     const originalOutline = snapshotOutline(first);
 
     effects.start();
-    toolbar.hideFocusHighlight.mockClear();
-
     first.focus();
-    expect(toolbar.positionFocusHighlight).toHaveBeenLastCalledWith(first);
+
     expect(first.hasAttribute("tabindex")).toBe(false);
     expect(first.getAttribute("data-a11y-page-focus-owned")).toBe("");
-    expect(first.style.getPropertyValue("outline-style")).toBe("none");
-    expect(first.style.getPropertyPriority("outline-style")).toBe("important");
-    expect(first.style.getPropertyValue("outline-color")).toBe("purple");
-    expect(first.style.getPropertyValue("outline-width")).toBe("7px");
+    expectOwnedOutline(first, "#ffb800");
     expect(first.style.getPropertyValue("outline-offset")).toBe("5px");
+    expect(first.style.getPropertyPriority("outline-offset")).toBe("important");
 
     second.focus();
-    expect(toolbar.positionFocusHighlight).toHaveBeenLastCalledWith(second);
     expect(first.hasAttribute("data-a11y-page-focus-owned")).toBe(false);
     expect(snapshotOutline(first)).toEqual(originalOutline);
+    expectOwnedOutline(second, "#ffb800");
 
     toolbarControl.focus();
-    expect(toolbar.hideFocusHighlight).toHaveBeenCalledTimes(1);
     expect(second.hasAttribute("data-a11y-page-focus-owned")).toBe(false);
+    expect(snapshotOutline(second)).toEqual(emptyOutline());
 
-    toolbar.positionFocusHighlight.mockClear();
     effects.deactivate();
     first.focus();
-    expect(toolbar.positionFocusHighlight).not.toHaveBeenCalled();
+    expect(snapshotOutline(first)).toEqual(originalOutline);
   });
 
   it("keeps open Shadow DOM toolbar controls excluded across resync and restart", () => {
@@ -69,30 +64,28 @@ describe("PageEffectsController focus highlighting", () => {
     effects.setRoots([document, toolRoot]);
 
     toolControl.focus();
-    toolbar.positionFocusHighlight.mockClear();
     effects.setRoots([document, toolRoot]);
-    expect(toolbar.positionFocusHighlight).not.toHaveBeenCalled();
-    expect(toolbar.hideFocusHighlight).toHaveBeenCalled();
+    expect(toolControl.hasAttribute("data-a11y-page-focus-owned")).toBe(false);
 
     effects.deactivate();
     const pageTarget = getElement("page-target");
     pageTarget.focus();
-    toolbar.positionFocusHighlight.mockClear();
-    document.dispatchEvent(new Event("scroll"));
-    window.dispatchEvent(new Event("resize"));
-    expect(toolbar.positionFocusHighlight).not.toHaveBeenCalled();
+    expect(snapshotOutline(pageTarget)).toEqual(emptyOutline());
 
     effects.start();
-    expect(toolbar.positionFocusHighlight).toHaveBeenLastCalledWith(pageTarget);
-    toolbar.positionFocusHighlight.mockClear();
-    getElement("page-target-2").focus();
-    expect(toolbar.positionFocusHighlight).toHaveBeenCalledTimes(1);
+    expectOwnedOutline(pageTarget, "#ffb800");
+    const pageTargetTwo = getElement("page-target-2");
+    pageTargetTwo.focus();
+    expect(snapshotOutline(pageTarget)).toEqual(emptyOutline());
+    expectOwnedOutline(pageTargetTwo, "#ffb800");
+
     effects.destroy();
+    expect(snapshotOutline(pageTargetTwo)).toEqual(emptyOutline());
   });
 
-  it("keeps reading, active-region and descendant focus overlays independent", () => {
+  it("coordinates region, current focus and reading ownership", () => {
     document.body.innerHTML = `
-      <section id="region" tabindex="-1">
+      <section id="region" tabindex="-1" aria-regionactive="legacy">
         <button id="inside">区域内部</button>
       </section>
     `;
@@ -100,31 +93,84 @@ describe("PageEffectsController focus highlighting", () => {
     const effects = createEffects(toolbar.ui);
     const region = getElement("region");
     const inside = getElement("inside");
+    region.style.setProperty("outline-color", "purple", "important");
+    region.style.setProperty("outline-style", "dotted", "important");
+    region.style.setProperty("outline-width", "7px", "important");
+    const originalRegionOutline = snapshotOutline(region);
 
     effects.start();
-    region.focus();
     effects.setRegionHighlight(region);
-    expect(toolbar.positionRegionHighlight).toHaveBeenLastCalledWith(region);
-    expect(toolbar.hideFocusHighlight).toHaveBeenCalled();
+    expect(region.getAttribute("tabindex")).toBe("-1");
+    expect(region.getAttribute("aria-regionactive")).toBe("true");
+    expectOwnedOutline(region, "#ff6c00");
 
-    toolbar.positionFocusHighlight.mockClear();
-    toolbar.hideRegionHighlight.mockClear();
+    region.focus();
+    expectOwnedOutline(region, "#ffb800");
+
     inside.focus();
-    expect(toolbar.positionFocusHighlight).toHaveBeenLastCalledWith(inside);
-    expect(toolbar.hideRegionHighlight).not.toHaveBeenCalled();
+    expectOwnedOutline(region, "#ff6c00");
+    expectOwnedOutline(inside, "#ffb800");
 
     effects.setHighlight(inside);
     expect(toolbar.positionHighlight).toHaveBeenLastCalledWith(inside);
     effects.clearHighlight(inside);
     expect(toolbar.hideHighlight).toHaveBeenCalled();
-    expect(toolbar.hideRegionHighlight).not.toHaveBeenCalled();
+    expectOwnedOutline(region, "#ff6c00");
+    expectOwnedOutline(inside, "#ffb800");
+
+    region.focus();
+    expect(snapshotOutline(inside)).toEqual(emptyOutline());
+    expectOwnedOutline(region, "#ffb800");
 
     effects.clearRegionHighlight(region);
-    expect(toolbar.hideRegionHighlight).toHaveBeenCalledTimes(1);
+    expect(region.getAttribute("tabindex")).toBe("-1");
+    expect(region.getAttribute("aria-regionactive")).toBe("legacy");
+    expectOwnedOutline(region, "#ffb800");
+
+    inside.focus();
+    expect(snapshotOutline(region)).toEqual(originalRegionOutline);
+    expectOwnedOutline(inside, "#ffb800");
     effects.destroy();
+    expect(snapshotOutline(inside)).toEqual(emptyOutline());
   });
 
-  it("repositions visible focus and hides targets that stop rendering", () => {
+  it("moves region ownership without leaving styles or attributes behind", () => {
+    document.body.innerHTML = `
+      <section id="region-a" tabindex="-1" aria-regionactive="legacy"></section>
+      <section id="region-b"></section>
+    `;
+    const toolbar = createToolbarMock();
+    const effects = createEffects(toolbar.ui);
+    const first = getElement("region-a");
+    const second = getElement("region-b");
+    first.style.setProperty("outline-color", "navy", "important");
+    first.style.setProperty("outline-style", "double", "important");
+    first.style.setProperty("outline-width", "4px", "important");
+    const originalFirstOutline = snapshotOutline(first);
+
+    effects.start();
+    effects.setRegionHighlight(first);
+    first.focus();
+    expectOwnedOutline(first, "#ffb800");
+
+    effects.setRegionHighlight(second);
+    expect(first.getAttribute("tabindex")).toBe("-1");
+    expect(first.getAttribute("aria-regionactive")).toBe("legacy");
+    expectOwnedOutline(first, "#ffb800");
+    expect(second.hasAttribute("tabindex")).toBe(false);
+    expect(second.getAttribute("aria-regionactive")).toBe("true");
+    expectOwnedOutline(second, "#ff6c00");
+
+    second.focus();
+    expect(snapshotOutline(first)).toEqual(originalFirstOutline);
+    expectOwnedOutline(second, "#ffb800");
+    effects.destroy();
+    expect(second.hasAttribute("tabindex")).toBe(false);
+    expect(second.hasAttribute("aria-regionactive")).toBe(false);
+    expect(snapshotOutline(second)).toEqual(emptyOutline());
+  });
+
+  it("releases a focus outline when the target stops rendering", () => {
     document.body.innerHTML = '<button id="moving">移动目标</button>';
     const toolbar = createToolbarMock();
     const effects = createEffects(toolbar.ui);
@@ -132,14 +178,12 @@ describe("PageEffectsController focus highlighting", () => {
 
     effects.start();
     moving.focus();
-    toolbar.positionFocusHighlight.mockClear();
-
-    document.dispatchEvent(new Event("scroll"));
-    expect(toolbar.positionFocusHighlight).toHaveBeenCalledWith(moving);
+    expectOwnedOutline(moving, "#ffb800");
 
     moving.hidden = true;
     effects.setRoots([document]);
-    expect(toolbar.hideFocusHighlight).toHaveBeenCalled();
+    expect(moving.hasAttribute("data-a11y-page-focus-owned")).toBe(false);
+    expect(snapshotOutline(moving)).toEqual(emptyOutline());
     effects.destroy();
   });
 });
@@ -160,13 +204,9 @@ function createToolbarMock() {
       )),
     getToolbarHeight: vi.fn(() => 102),
     hideCrosshair: vi.fn(),
-    hideFocusHighlight: vi.fn(),
     hideHighlight: vi.fn(),
-    hideRegionHighlight: vi.fn(),
     positionCrosshair: vi.fn(),
-    positionFocusHighlight: vi.fn(),
     positionHighlight: vi.fn(),
-    positionRegionHighlight: vi.fn(),
   };
   return { ...mocks, ui: mocks as unknown as ToolbarUI };
 }
@@ -179,6 +219,15 @@ function getElement(id: string): HTMLElement {
   return element;
 }
 
+function expectOwnedOutline(element: HTMLElement, color: string): void {
+  expect(element.style.getPropertyValue("outline-color")).toBe(color);
+  expect(element.style.getPropertyValue("outline-style")).toBe("solid");
+  expect(element.style.getPropertyValue("outline-width")).toBe("2px");
+  for (const property of ["outline-color", "outline-style", "outline-width"]) {
+    expect(element.style.getPropertyPriority(property)).toBe("important");
+  }
+}
+
 function snapshotOutline(element: HTMLElement): Record<string, string> {
   return Object.fromEntries(
     ["outline-color", "outline-style", "outline-width", "outline-offset"].map(
@@ -188,4 +237,13 @@ function snapshotOutline(element: HTMLElement): Record<string, string> {
       ],
     ),
   );
+}
+
+function emptyOutline(): Record<string, string> {
+  return {
+    "outline-color": "|",
+    "outline-style": "|",
+    "outline-width": "|",
+    "outline-offset": "|",
+  };
 }

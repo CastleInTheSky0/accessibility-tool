@@ -89,9 +89,6 @@ const SWITCH_FEATURES = new Set<FeatureId>([
   "readScreen",
 ]);
 
-const FOCUS_OVERLAY_VIEWPORT_MARGIN = 6;
-const REGION_OVERLAY_VIEWPORT_MARGIN = 9;
-
 export class ToolbarUI {
   private readonly root: HTMLDivElement;
   private readonly toolbar: HTMLDivElement;
@@ -105,8 +102,6 @@ export class ToolbarUI {
   private readonly horizontalLine: HTMLDivElement;
   private readonly verticalLine: HTMLDivElement;
   private readonly highlight: HTMLDivElement;
-  private readonly regionHighlight: HTMLDivElement;
-  private readonly focusHighlight: HTMLDivElement;
   private readonly controls = new Map<ToolbarAction, HTMLElement>();
   private regionCounts: Record<RegionType, number> = {
     viewport: 0,
@@ -173,8 +168,6 @@ export class ToolbarUI {
     this.horizontalLine = this.createOverlay("a11y-crosshair a11y-crosshair--x");
     this.verticalLine = this.createOverlay("a11y-crosshair a11y-crosshair--y");
     this.highlight = this.createOverlay("a11y-highlight");
-    this.regionHighlight = this.createOverlay("a11y-region-highlight");
-    this.focusHighlight = this.createOverlay("a11y-focus-highlight");
 
     this.root.append(
       this.toolbar,
@@ -184,8 +177,6 @@ export class ToolbarUI {
       this.horizontalLine,
       this.verticalLine,
       this.highlight,
-      this.regionHighlight,
-      this.focusHighlight,
     );
     shadowRoot.append(this.root);
 
@@ -208,8 +199,6 @@ export class ToolbarUI {
     this.cancelCollapse();
     this.hideCrosshair();
     this.hideHighlight();
-    this.hideRegionHighlight();
-    this.hideFocusHighlight();
     this.root.hidden = true;
     this.host.hidden = true;
   }
@@ -401,34 +390,6 @@ export class ToolbarUI {
     this.highlight.hidden = true;
   }
 
-  positionRegionHighlight(element: HTMLElement): void {
-    this.positionElementOverlay(
-      this.regionHighlight,
-      "region-highlight",
-      element,
-      REGION_OVERLAY_VIEWPORT_MARGIN,
-      true,
-    );
-  }
-
-  hideRegionHighlight(): void {
-    this.regionHighlight.hidden = true;
-  }
-
-  positionFocusHighlight(element: HTMLElement): void {
-    this.positionElementOverlay(
-      this.focusHighlight,
-      "focus-highlight",
-      element,
-      FOCUS_OVERLAY_VIEWPORT_MARGIN,
-      true,
-    );
-  }
-
-  hideFocusHighlight(): void {
-    this.focusHighlight.hidden = true;
-  }
-
   positionCrosshair(x: number, y: number): void {
     this.horizontalLine.style.setProperty("--a11y-crosshair-y", `${y}px`);
     this.verticalLine.style.setProperty("--a11y-crosshair-x", `${x}px`);
@@ -611,7 +572,6 @@ export class ToolbarUI {
     });
     this.root.addEventListener("pointerleave", () => this.scheduleCollapse());
     this.root.addEventListener("focusin", () => {
-      this.hideFocusHighlight();
       this.callbacks.onFocusInside?.();
       this.cancelCollapse();
       this.setCollapsed(false);
@@ -784,19 +744,11 @@ export class ToolbarUI {
 
   private positionElementOverlay(
     overlay: HTMLDivElement,
-    variableName: "highlight" | "region-highlight" | "focus-highlight",
+    variableName: "highlight",
     element: HTMLElement,
-    viewportMargin = 0,
-    requireArea = false,
   ): void {
-    const globalRect = getGlobalRect(element);
-    const rect =
-      globalRect && viewportMargin > 0
-        ? getViewportIntersection(globalRect, viewportMargin)
-        : globalRect;
-    const hasNoArea = requireArea
-      ? rect && (rect.width <= 0 || rect.height <= 0)
-      : rect && rect.width <= 0 && rect.height <= 0;
+    const rect = getGlobalRect(element);
+    const hasNoArea = rect && rect.width <= 0 && rect.height <= 0;
     if (!rect || hasNoArea) {
       overlay.hidden = true;
       return;
@@ -873,23 +825,6 @@ function getGlobalRect(element: HTMLElement): DOMRect | null {
     // The element remains highlightable inside the last same-origin boundary.
   }
   return rect;
-}
-
-function getViewportIntersection(
-  rect: DOMRect,
-  margin: number,
-): DOMRect | null {
-  const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
-  const viewportHeight =
-    window.innerHeight || document.documentElement.clientHeight;
-  const left = Math.max(margin, rect.left);
-  const top = Math.max(margin, rect.top);
-  const right = Math.min(viewportWidth - margin, rect.right);
-  const bottom = Math.min(viewportHeight - margin, rect.bottom);
-  if (right <= left || bottom <= top) {
-    return null;
-  }
-  return new DOMRect(left, top, right - left, bottom - top);
 }
 
 function intersectRects(first: DOMRect, second: DOMRect): DOMRect | null {

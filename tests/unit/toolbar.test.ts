@@ -40,7 +40,7 @@ describe("ToolbarUI", () => {
     host.remove();
   });
 
-  it("keeps focus, region and reading overlays independent inside the viewport", () => {
+  it("keeps only the reading target as a toolbar-owned overlay", () => {
     const host = document.createElement("div");
     document.body.append(host);
     const shadow = host.attachShadow({ mode: "open" });
@@ -56,33 +56,19 @@ describe("ToolbarUI", () => {
     );
 
     ui.positionHighlight(target);
-    ui.positionRegionHighlight(target);
-    ui.positionFocusHighlight(target);
     const readingOverlay = shadow.querySelector<HTMLElement>(".a11y-highlight");
-    const regionOverlay = shadow.querySelector<HTMLElement>(
-      ".a11y-region-highlight",
-    );
-    const focusOverlay = shadow.querySelector<HTMLElement>(
-      ".a11y-focus-highlight",
-    );
     expect(readingOverlay?.hidden).toBe(false);
-    expect(regionOverlay?.hidden).toBe(false);
-    expect(focusOverlay?.hidden).toBe(false);
-    expect(focusOverlay?.style.getPropertyValue("--a11y-focus-highlight-x")).toBe(
-      "6px",
+    expect(readingOverlay?.style.getPropertyValue("--a11y-highlight-x")).toBe(
+      "-20px",
     );
-    expect(focusOverlay?.style.getPropertyValue("--a11y-focus-highlight-y")).toBe(
-      "6px",
+    expect(readingOverlay?.style.getPropertyValue("--a11y-highlight-y")).toBe(
+      "-10px",
     );
+    expect(shadow.querySelector(".a11y-region-highlight")).toBeNull();
+    expect(shadow.querySelector(".a11y-focus-highlight")).toBeNull();
 
     ui.hideHighlight();
     expect(readingOverlay?.hidden).toBe(true);
-    expect(regionOverlay?.hidden).toBe(false);
-    expect(focusOverlay?.hidden).toBe(false);
-
-    ui.hideRegionHighlight();
-    expect(regionOverlay?.hidden).toBe(true);
-    expect(focusOverlay?.hidden).toBe(false);
 
     ui.destroy();
     target.remove();

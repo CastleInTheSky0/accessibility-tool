@@ -1,5 +1,8 @@
 import { expect, test, type Locator } from "@playwright/test";
 
+const FOCUS_COLOR = "rgb(255, 184, 0)";
+const REGION_COLOR = "rgb(255, 108, 0)";
+
 test.beforeEach(async ({ page }) => {
   await page.goto("/?debug=1");
   await page.evaluate(() => {
@@ -20,136 +23,130 @@ test("follows native page focus from keyboard, script and mouse", async ({
   page,
 }) => {
   const host = page.locator("[data-a11y-tool-host]");
-  const overlay = host.locator(".a11y-focus-highlight");
   const first = page.locator("#focus-first");
   const second = page.locator("#focus-second");
+  const originalFirstOutline = await snapshotInlineOutline(first);
 
   await first.focus();
   await expect(first).toBeFocused();
-  await expectOverlayToMatch(overlay, first);
+  await expectOwnedOutline(first, FOCUS_COLOR);
   await expect(first).toHaveAttribute("data-a11y-page-focus-owned", "");
-  await expect(first).toHaveCSS("outline-style", "none");
 
   await page.keyboard.press("Tab");
   await expect(second).toBeFocused();
-  await expectOverlayToMatch(overlay, second);
+  await expectOwnedOutline(second, FOCUS_COLOR);
+  expect(await snapshotInlineOutline(first)).toEqual(originalFirstOutline);
 
   await page.keyboard.press("Shift+Tab");
   await expect(first).toBeFocused();
-  await expectOverlayToMatch(overlay, first);
+  await expectOwnedOutline(first, FOCUS_COLOR);
 
   await second.click();
   await expect(second).toBeFocused();
-  await expectOverlayToMatch(overlay, second);
+  await expectOwnedOutline(second, FOCUS_COLOR);
   await expect(first).not.toHaveAttribute("tabindex", /.+/);
   await expect(second).not.toHaveAttribute("tabindex", /.+/);
+  await expect(host.locator(".a11y-focus-highlight")).toHaveCount(0);
+  await expect(host.locator(".a11y-region-highlight")).toHaveCount(0);
 });
 
-test("excludes toolbar controls and removes focus tracking on close and destroy", async ({
+test("excludes toolbar controls and restores focus styles on close and destroy", async ({
   page,
 }) => {
   const host = page.locator("[data-a11y-tool-host]");
-  const overlay = host.locator(".a11y-focus-highlight");
   const pageTarget = page.locator("#focus-first");
+  const originalOutline = await snapshotInlineOutline(pageTarget);
 
   await pageTarget.focus();
-  await expect(overlay).not.toHaveAttribute("hidden", "");
-  await expect(pageTarget).toHaveCSS("outline-style", "none");
+  await expectOwnedOutline(pageTarget, FOCUS_COLOR);
 
-  await host.locator('[data-action="reading"]').focus();
-  await expect(overlay).toHaveAttribute("hidden", "");
-  await page.evaluate(() => window.AccessibilityTool.refresh());
-  await expect(overlay).toHaveAttribute("hidden", "");
-
-  await host.locator('[data-mode="main"] [data-action="exit"]').click();
-  await pageTarget.focus();
-  await expect(overlay).toHaveAttribute("hidden", "");
-  await expect(pageTarget).not.toHaveAttribute(
+  const toolbarControl = host.locator('[data-action="reading"]');
+  await toolbarControl.focus();
+  await expect(toolbarControl).toBeFocused();
+  expect(await snapshotInlineOutline(pageTarget)).toEqual(originalOutline);
+  await expect(toolbarControl).not.toHaveAttribute(
     "data-a11y-page-focus-owned",
     "",
   );
-  await expect(pageTarget).toHaveCSS("outline-style", "solid");
-  await expect
-    .poll(() =>
-      pageTarget.evaluate((element) => ({
-        color: element.style.getPropertyValue("outline-color"),
-        offset: element.style.getPropertyValue("outline-offset"),
-        style: element.style.getPropertyValue("outline-style"),
-        stylePriority: element.style.getPropertyPriority("outline-style"),
-        width: element.style.getPropertyValue("outline-width"),
-      })),
-    )
-    .toEqual({
-      color: "rgb(0, 85, 204)",
-      offset: "2px",
-      style: "solid",
-      stylePriority: "important",
-      width: "3px",
-    });
+
+  await page.evaluate(() => window.AccessibilityTool.refresh());
+  expect(await snapshotInlineOutline(pageTarget)).toEqual(originalOutline);
+
+  await host.locator('[data-mode="main"] [data-action="exit"]').click();
+  await pageTarget.focus();
+  expect(await snapshotInlineOutline(pageTarget)).toEqual(originalOutline);
 
   await page.getByRole("button", { name: "打开无障碍工具" }).click();
   await expect(host).toHaveCount(1);
   await pageTarget.focus();
-  await expectOverlayToMatch(overlay, pageTarget);
+  await expectOwnedOutline(pageTarget, FOCUS_COLOR);
 
   await page.evaluate(() => window.AccessibilityTool.destroy());
   await expect(host).toHaveCount(0);
+  expect(await snapshotInlineOutline(pageTarget)).toEqual(originalOutline);
 });
 
-test("keeps a distinct region frame while native Tab traverses descendants", async ({
+test("adds region anchors to ordinary Tab order and preserves native descendants", async ({
   page,
 }) => {
   const host = page.locator("[data-a11y-tool-host]");
-  const focusOverlay = host.locator(".a11y-focus-highlight");
-  const regionOverlay = host.locator(".a11y-region-highlight");
-  await host.locator('[data-mode="main"] [data-action="readScreen"]').click();
-  await host.getByRole("button", { name: "导航区，共 4 个" }).click();
 
   const region = page.locator("header nav");
   const firstLink = region.getByRole("link", { name: "盲道区域" });
   const secondLink = region.getByRole("link", { name: "选项卡" });
   const previousLink = page.getByRole("link", { name: "A11Y / TOOL" });
+  const originalRegionOutline = await snapshotInlineOutline(region);
+
+  await previousLink.focus();
+  await expect(previousLink).toBeFocused();
+  await page.keyboard.press("Tab");
   await expect(region).toBeFocused();
-  await expectOverlayToMatch(regionOverlay, region);
-  await expect(regionOverlay).toHaveCSS("border-color", "rgb(0, 229, 255)");
-  await expect(focusOverlay).toHaveAttribute("hidden", "");
-  await expect(region).toHaveCSS("outline-style", "none");
+  await expect(region).toHaveAttribute("tabindex", "0");
+  await expect(region).toHaveAttribute("aria-regionactive", "true");
+  await expectOwnedOutline(region, FOCUS_COLOR);
 
   await page.keyboard.press("Tab");
   await expect(firstLink).toBeFocused();
-  await expectOverlayToMatch(regionOverlay, region);
-  await expectOverlayToMatch(focusOverlay, firstLink);
+  await expectOwnedOutline(region, REGION_COLOR);
+  await expectOwnedOutline(firstLink, FOCUS_COLOR);
 
   await page.keyboard.press("Tab");
   await expect(secondLink).toBeFocused();
-  await expectOverlayToMatch(regionOverlay, region);
-  await expectOverlayToMatch(focusOverlay, secondLink);
+  await expectOwnedOutline(region, REGION_COLOR);
+  await expectOwnedOutline(secondLink, FOCUS_COLOR);
 
   await page.keyboard.press("Shift+Tab");
   await expect(firstLink).toBeFocused();
-  await expectOverlayToMatch(regionOverlay, region);
-  await expectOverlayToMatch(focusOverlay, firstLink);
+  await expectOwnedOutline(region, REGION_COLOR);
+  await expectOwnedOutline(firstLink, FOCUS_COLOR);
   await expect(firstLink).not.toHaveAttribute("tabindex", /.+/);
   await expect(secondLink).not.toHaveAttribute("tabindex", /.+/);
 
   await page.keyboard.press("Shift+Tab");
+  await expect(region).toBeFocused();
+  await expectOwnedOutline(region, FOCUS_COLOR);
+
+  await page.keyboard.press("Shift+Tab");
   await expect(previousLink).toBeFocused();
-  await expect(regionOverlay).toHaveAttribute("hidden", "");
-  await expectOverlayToMatch(focusOverlay, previousLink);
+  await expectOwnedOutline(previousLink, FOCUS_COLOR);
+  await expect(region).toHaveAttribute("tabindex", "0");
+  await expect(region).not.toHaveAttribute("aria-regionactive", /.+/);
+  expect(await snapshotInlineOutline(region)).toEqual(originalRegionOutline);
+
+  await host.locator('[data-mode="main"] [data-action="exit"]').click();
+  await expect(region).not.toHaveAttribute("tabindex", /.+/);
+  expect(await snapshotInlineOutline(region)).toEqual(originalRegionOutline);
 });
 
-test("tracks open Shadow DOM and same-origin iframe focus while scrolling", async ({
+test("tracks open Shadow DOM and same-origin iframe focus without geometry overlays", async ({
   page,
 }) => {
-  const overlay = page
-    .locator("[data-a11y-tool-host]")
-    .locator(".a11y-focus-highlight");
   const shadowLink = page.locator("#shadow-demo").getByRole("link", {
     name: "返回区域协议",
   });
 
   await shadowLink.focus();
-  await expectOverlayToMatch(overlay, shadowLink);
+  await expectOwnedOutline(shadowLink, FOCUS_COLOR);
 
   const frameLink = page
     .frameLocator('iframe[title="同源区域演示"]')
@@ -159,111 +156,137 @@ test("tracks open Shadow DOM and same-origin iframe focus while scrolling", asyn
     frame.style.transformOrigin = "top left";
   });
   await frameLink.focus();
-  await expectOverlayToMatch(overlay, frameLink);
+  await expectOwnedOutline(frameLink, FOCUS_COLOR);
+  await expect(shadowLink).not.toHaveAttribute("data-a11y-page-focus-owned", "");
 
   await page.evaluate(() => window.scrollBy(0, 40));
-  await expectOverlayToMatch(overlay, frameLink);
+  await expectOwnedOutline(frameLink, FOCUS_COLOR);
   await page.setViewportSize({ width: 1180, height: 760 });
-  await expectOverlayToMatch(overlay, frameLink);
+  await expectOwnedOutline(frameLink, FOCUS_COLOR);
 });
 
 test("keeps an outer region active while focus enters a same-origin iframe", async ({
   page,
 }) => {
   const host = page.locator("[data-a11y-tool-host]");
-  const focusOverlay = host.locator(".a11y-focus-highlight");
-  const regionOverlay = host.locator(".a11y-region-highlight");
   await host.locator('[data-mode="main"] [data-action="readScreen"]').click();
   await host.getByRole("button", { name: "导航区，共 4 个" }).click();
 
   const region = page.locator("header nav");
-  await expectOverlayToMatch(regionOverlay, region);
+  await expectOwnedOutline(region, FOCUS_COLOR);
   await page.evaluate(() => {
     const frame = document.createElement("iframe");
     frame.id = "region-child-frame";
     frame.title = "区域内同源页面";
     frame.srcdoc =
-      "<!doctype html><html><body><nav data-a11y-region='navigation' data-a11y-label='区域内导航'><button id='inside-frame'>区域内按钮</button></nav></body></html>";
+      "<!doctype html><html><body><button id='inside-frame'>区域内按钮</button></body></html>";
     document.querySelector("header nav")?.append(frame);
   });
-  await expect(
-    host.getByRole("button", { name: "导航区，共 5 个" }),
-  ).toBeVisible();
 
   const frameButton = page
     .frameLocator("#region-child-frame")
     .getByRole("button", { name: "区域内按钮" });
+  await expect(frameButton).toBeVisible();
   await frameButton.focus();
-  await expectOverlayToMatch(regionOverlay, region);
-  await expectOverlayToMatch(focusOverlay, frameButton);
+  await expectOwnedOutline(region, REGION_COLOR);
+  await expectOwnedOutline(frameButton, FOCUS_COLOR);
 
   const outside = page.locator("#focus-first");
   await outside.focus();
-  await expect(regionOverlay).toHaveAttribute("hidden", "");
-  await expectOverlayToMatch(focusOverlay, outside);
+  await expectOwnedOutline(outside, FOCUS_COLOR);
+  await expect(region).not.toHaveAttribute("aria-regionactive", /.+/);
+  await expect(region).toHaveAttribute("tabindex", "0");
 });
 
-test("keeps focus and region frames distinct in forced colors", async ({
+test("retains distinct inline outline ownership in forced colors", async ({
   page,
 }) => {
   await page.emulateMedia({ forcedColors: "active" });
   const host = page.locator("[data-a11y-tool-host]");
-  const focusOverlay = host.locator(".a11y-focus-highlight");
-  const regionOverlay = host.locator(".a11y-region-highlight");
   await host.locator('[data-mode="main"] [data-action="readScreen"]').click();
   await host.getByRole("button", { name: "导航区，共 4 个" }).click();
   await page.keyboard.press("Tab");
-  await expect(focusOverlay).toBeVisible();
-  await expect(regionOverlay).toBeVisible();
 
-  const presentation = await host.evaluate((element) => {
-    const root = element.shadowRoot;
-    const focus = root?.querySelector<HTMLElement>(".a11y-focus-highlight");
-    const region = root?.querySelector<HTMLElement>(".a11y-region-highlight");
-    if (!focus || !region) {
-      return null;
-    }
-    const focusStyle = getComputedStyle(focus);
-    const regionStyle = getComputedStyle(region);
-    return {
-      focusBackground: focusStyle.backgroundColor,
-      focusBorderStyle: focusStyle.borderStyle,
-      regionBackground: regionStyle.backgroundColor,
-      regionBorderStyle: regionStyle.borderStyle,
-    };
+  const region = page.locator("header nav");
+  const focused = region.getByRole("link", { name: "盲道区域" });
+  expect(await snapshotOwnedInlineOutline(region)).toEqual({
+    color: REGION_COLOR,
+    colorPriority: "important",
+    style: "solid",
+    stylePriority: "important",
+    width: "2px",
+    widthPriority: "important",
   });
-  expect(presentation).toEqual({
-    focusBackground: "rgba(0, 0, 0, 0)",
-    focusBorderStyle: "solid",
-    regionBackground: "rgba(0, 0, 0, 0)",
-    regionBorderStyle: "double",
+  expect(await snapshotOwnedInlineOutline(focused)).toEqual({
+    color: FOCUS_COLOR,
+    colorPriority: "important",
+    style: "solid",
+    stylePriority: "important",
+    width: "2px",
+    widthPriority: "important",
   });
+  await expect(region).toHaveCSS("outline-width", "2px");
+  await expect(focused).toHaveCSS("outline-width", "2px");
 });
 
-async function expectOverlayToMatch(
-  overlay: Locator,
+async function expectOwnedOutline(
   target: Locator,
+  color: string,
 ): Promise<void> {
-  await expect(overlay).toBeVisible();
+  await expect(target).toHaveCSS("outline-color", color);
+  await expect(target).toHaveCSS("outline-style", "solid");
+  await expect(target).toHaveCSS("outline-width", "2px");
   await expect
-    .poll(async () => {
-      const [overlayBox, targetBox] = await Promise.all([
-        overlay.boundingBox(),
-        target.boundingBox(),
-      ]);
-      if (!overlayBox || !targetBox) {
-        return null;
-      }
-      return {
-        x: normalizeRounded(overlayBox.x - targetBox.x),
-        y: normalizeRounded(overlayBox.y - targetBox.y),
-        width: normalizeRounded(overlayBox.width - targetBox.width),
-        height: normalizeRounded(overlayBox.height - targetBox.height),
-      };
-    })
-    .toEqual({ x: 0, y: 0, width: 0, height: 0 });
+    .poll(() => snapshotOwnedInlineOutline(target))
+    .toMatchObject({
+      colorPriority: "important",
+      stylePriority: "important",
+      widthPriority: "important",
+    });
 }
 
-function normalizeRounded(value: number): number {
-  return Math.round(value) || 0;
+async function snapshotOwnedInlineOutline(target: Locator): Promise<{
+  color: string;
+  colorPriority: string;
+  style: string;
+  stylePriority: string;
+  width: string;
+  widthPriority: string;
+}> {
+  return target.evaluate((element) => {
+    const htmlElement = element as HTMLElement;
+    return {
+      color: htmlElement.style.getPropertyValue("outline-color"),
+      colorPriority: htmlElement.style.getPropertyPriority("outline-color"),
+      style: htmlElement.style.getPropertyValue("outline-style"),
+      stylePriority: htmlElement.style.getPropertyPriority("outline-style"),
+      width: htmlElement.style.getPropertyValue("outline-width"),
+      widthPriority: htmlElement.style.getPropertyPriority("outline-width"),
+    };
+  });
+}
+
+async function snapshotInlineOutline(target: Locator): Promise<{
+  color: string;
+  colorPriority: string;
+  offset: string;
+  offsetPriority: string;
+  style: string;
+  stylePriority: string;
+  width: string;
+  widthPriority: string;
+}> {
+  return target.evaluate((element) => {
+    const htmlElement = element as HTMLElement;
+    return {
+      color: htmlElement.style.getPropertyValue("outline-color"),
+      colorPriority: htmlElement.style.getPropertyPriority("outline-color"),
+      offset: htmlElement.style.getPropertyValue("outline-offset"),
+      offsetPriority: htmlElement.style.getPropertyPriority("outline-offset"),
+      style: htmlElement.style.getPropertyValue("outline-style"),
+      stylePriority: htmlElement.style.getPropertyPriority("outline-style"),
+      width: htmlElement.style.getPropertyValue("outline-width"),
+      widthPriority: htmlElement.style.getPropertyPriority("outline-width"),
+    };
+  });
 }

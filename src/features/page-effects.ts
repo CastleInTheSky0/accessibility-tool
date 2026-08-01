@@ -14,13 +14,19 @@ interface PageEffectsCallbacks {
   onError: (error: unknown, message: string) => void;
 }
 
+const PAGE_FOCUS_OUTLINE_COLOR = "#ffb800";
+const ACTIVE_REGION_OUTLINE_COLOR = "#ff6c00";
+const OWNED_OUTLINE_WIDTH = "2px";
+
 export class PageEffectsController {
   private readonly effectLedger = new DomLedger();
   private readonly placementLedger = new DomLedger();
   private readonly focusPresentationLedger = new DomLedger();
+  private readonly regionPresentationLedger = new DomLedger();
   private state: AccessibilityToolState | null = null;
   private readingHighlightedElement: HTMLElement | null = null;
   private regionHighlightedElement: HTMLElement | null = null;
+  private regionPresentationElement: HTMLElement | null = null;
   private focusedElement: HTMLElement | null = null;
   private focusPresentationElement: HTMLElement | null = null;
   private roots: (Document | ShadowRoot)[] = [document];
@@ -117,8 +123,10 @@ export class PageEffectsController {
     this.effectLedger.restore();
     this.placementLedger.restore();
     this.clearHighlight();
-    this.clearRegionHighlight();
-    this.clearFocusHighlight();
+    this.focusedElement = null;
+    this.releaseFocusPresentation();
+    this.regionHighlightedElement = null;
+    this.releaseRegionPresentation();
     this.cancelFocusSync();
     this.unbindRootListeners();
     if (this.started) {
@@ -179,34 +187,20 @@ export class PageEffectsController {
       this.clearRegionHighlight();
       return;
     }
-    this.regionHighlightedElement = element;
-    if (element.isConnected && isVisible(element)) {
-      this.ui.positionRegionHighlight(element);
-    } else {
-      this.regionHighlightedElement = null;
-      this.ui.hideRegionHighlight();
+    if (!element.isConnected || !isVisible(element)) {
+      this.clearRegionHighlight();
       return;
     }
-    if (this.focusedElement === element) {
-      this.ui.hideFocusHighlight();
-    }
+    this.regionHighlightedElement = element;
+    this.transitionRegionPresentation(element);
   }
 
   clearRegionHighlight(element?: HTMLElement): void {
     if (element && this.regionHighlightedElement !== element) {
       return;
     }
-    const previousRegion = this.regionHighlightedElement;
     this.regionHighlightedElement = null;
-    this.ui.hideRegionHighlight();
-    if (
-      previousRegion &&
-      this.focusedElement === previousRegion &&
-      this.isFocusHighlightTarget(previousRegion) &&
-      isElementCurrentlyFocused(previousRegion)
-    ) {
-      this.ui.positionFocusHighlight(previousRegion);
-    }
+    this.transitionRegionPresentation(null);
   }
 
   destroy(): void {
@@ -343,28 +337,11 @@ export class PageEffectsController {
     this.scheduleFocusSync();
   };
 
-  private readonly repositionHighlights = (): void => {
+  private readonly repositionReadingHighlight = (): void => {
     if (this.readingHighlightedElement?.isConnected) {
       this.ui.positionHighlight(this.readingHighlightedElement);
     } else if (this.readingHighlightedElement) {
       this.clearHighlight();
-    }
-    if (
-      this.regionHighlightedElement?.isConnected &&
-      isVisible(this.regionHighlightedElement)
-    ) {
-      this.ui.positionRegionHighlight(this.regionHighlightedElement);
-    } else if (this.regionHighlightedElement) {
-      this.clearRegionHighlight();
-    }
-    if (
-      this.focusedElement &&
-      this.isFocusHighlightTarget(this.focusedElement) &&
-      isElementCurrentlyFocused(this.focusedElement)
-    ) {
-      this.presentFocusTarget(this.focusedElement);
-    } else if (this.focusedElement) {
-      this.clearFocusHighlight();
     }
   };
 
@@ -379,7 +356,7 @@ export class PageEffectsController {
       }
       root.addEventListener("focusin", this.handleFocusIn, true);
       root.addEventListener("focusout", this.handleFocusOut, true);
-      root.addEventListener("scroll", this.repositionHighlights, {
+      root.addEventListener("scroll", this.repositionReadingHighlight, {
         capture: true,
         passive: true,
       });
@@ -387,7 +364,7 @@ export class PageEffectsController {
 
       const view = getRootDocument(root).defaultView;
       if (view && !this.boundWindows.has(view)) {
-        view.addEventListener("resize", this.repositionHighlights, {
+        view.addEventListener("resize", this.repositionReadingHighlight, {
           passive: true,
         });
         this.boundWindows.add(view);
@@ -399,11 +376,11 @@ export class PageEffectsController {
     for (const root of this.boundRoots) {
       root.removeEventListener("focusin", this.handleFocusIn, true);
       root.removeEventListener("focusout", this.handleFocusOut, true);
-      root.removeEventListener("scroll", this.repositionHighlights, true);
+      root.removeEventListener("scroll", this.repositionReadingHighlight, true);
     }
     this.boundRoots.clear();
     for (const view of this.boundWindows) {
-      view.removeEventListener("resize", this.repositionHighlights);
+      view.removeEventListener("resize", this.repositionReadingHighlight);
     }
     this.boundWindows.clear();
   }
@@ -465,45 +442,103 @@ export class PageEffectsController {
 
   clearFocusHighlight(): void {
     this.focusedElement = null;
-    this.ui.hideFocusHighlight();
     this.releaseFocusPresentation();
   }
 
   private presentFocusTarget(element: HTMLElement): void {
     this.focusedElement = element;
-    this.claimFocusPresentation(element);
-    if (element === this.regionHighlightedElement) {
-      this.ui.hideFocusHighlight();
-    } else {
-      this.ui.positionFocusHighlight(element);
+    this.transitionFocusPresentation(element);
+  }
+
+  private transitionRegionPresentation(element: HTMLElement | null): void {
+    if (this.regionPresentationElement === element) {
+      return;
+    }
+
+    const focusCandidate = this.focusedElement;
+    const shouldReclaimFocus = Boolean(
+      this.focusPresentationElement &&
+        (this.focusPresentationElement === this.regionPresentationElement ||
+          this.focusPresentationElement === element),
+    );
+    if (shouldReclaimFocus) {
+      this.releaseFocusPresentation();
+    }
+
+    this.releaseRegionPresentation();
+    if (element?.isConnected && isVisible(element)) {
+      this.claimRegionPresentation(element);
+    } else if (element) {
+      this.regionHighlightedElement = null;
+    }
+
+    if (shouldReclaimFocus && focusCandidate) {
+      this.transitionFocusPresentation(focusCandidate);
     }
   }
 
-  private claimFocusPresentation(element: HTMLElement): void {
+  private claimRegionPresentation(element: HTMLElement): void {
+    this.regionPresentationLedger.setAttribute(
+      element,
+      "aria-regionactive",
+      "true",
+    );
+    this.setOwnedOutline(
+      this.regionPresentationLedger,
+      element,
+      ACTIVE_REGION_OUTLINE_COLOR,
+    );
+    this.regionPresentationElement = element;
+  }
+
+  private transitionFocusPresentation(element: HTMLElement | null): void {
     if (this.focusPresentationElement === element) {
       return;
     }
     this.releaseFocusPresentation();
-    this.focusPresentationElement = element;
+    if (
+      element &&
+      this.isFocusHighlightTarget(element) &&
+      isElementCurrentlyFocused(element)
+    ) {
+      this.claimFocusPresentation(element);
+    } else if (element) {
+      this.focusedElement = null;
+    }
+  }
+
+  private claimFocusPresentation(element: HTMLElement): void {
     this.focusPresentationLedger.setAttribute(
       element,
       "data-a11y-page-focus-owned",
       "",
     );
-    const view = element.ownerDocument.defaultView;
-    if (view?.getComputedStyle(element).outlineStyle !== "none") {
-      this.focusPresentationLedger.setStyle(
-        element,
-        "outline-style",
-        "none",
-        "important",
-      );
-    }
+    this.setOwnedOutline(
+      this.focusPresentationLedger,
+      element,
+      PAGE_FOCUS_OUTLINE_COLOR,
+    );
+    this.focusPresentationElement = element;
+  }
+
+  private setOwnedOutline(
+    ledger: DomLedger,
+    element: HTMLElement,
+    color: string,
+  ): void {
+    ledger.setStyle(element, "outline-color", color, "important");
+    ledger.setStyle(element, "outline-style", "solid", "important");
+    ledger.setStyle(element, "outline-width", OWNED_OUTLINE_WIDTH, "important");
   }
 
   private releaseFocusPresentation(): void {
     this.focusPresentationLedger.restore();
     this.focusPresentationElement = null;
+  }
+
+  private releaseRegionPresentation(): void {
+    this.regionPresentationLedger.restore();
+    this.regionPresentationElement = null;
   }
 }
 

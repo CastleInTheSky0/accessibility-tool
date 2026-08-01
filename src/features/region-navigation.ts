@@ -23,6 +23,7 @@ interface RegionNavigationCallbacks {
 
 export class RegionNavigationController {
   private readonly ledger = new DomLedger();
+  private readonly tabIndexSnapshots = new Map<HTMLElement, string | null>();
   private readonly lastIndexes = new Map<RegionType, number>();
   private regions: readonly ScannedRegion[] = [];
   private current: ScannedRegion | null = null;
@@ -46,7 +47,7 @@ export class RegionNavigationController {
     this.detachRootListeners();
     this.roots = [];
     this.clearActiveRegion();
-    this.ledger.restore();
+    this.restoreAllRegionTabStops();
     this.resetPositions();
   }
 
@@ -60,6 +61,7 @@ export class RegionNavigationController {
     const previousIndex = this.currentIndex;
     this.regions = regions;
     this.setRoots(roots);
+    this.reconcileRegionTabStops();
     const counts = this.getCounts();
     this.callbacks.onCountsChange(counts);
 
@@ -102,6 +104,7 @@ export class RegionNavigationController {
   clearActiveRegion(): void {
     this.current = null;
     this.currentIndex = -1;
+    this.ledger.restore();
     this.effects.clearRegionHighlight();
   }
 
@@ -154,9 +157,11 @@ export class RegionNavigationController {
         behavior: this.getScrollBehavior(element),
       });
     }
-    if (!isNaturallyFocusable(element) && !element.hasAttribute("tabindex")) {
-      this.ledger.setAttribute(element, "tabindex", "-1");
-    }
+    this.ledger.restore();
+    this.current = region;
+    this.currentIndex = index;
+    this.lastIndexes.set(region.type, index);
+    this.effects.setRegionHighlight(element);
     this.ledger.setStyle(
       element,
       "scroll-margin-top",
@@ -168,11 +173,6 @@ export class RegionNavigationController {
       inline: "nearest",
       behavior: this.getScrollBehavior(element),
     });
-
-    this.current = region;
-    this.currentIndex = index;
-    this.lastIndexes.set(region.type, index);
-    this.effects.setRegionHighlight(element);
 
     const message = `${region.label}，${REGION_LABELS[region.type]}，第 ${index + 1} 个，共 ${count} 个`;
     this.callbacks.onAnnounce(message);
@@ -228,17 +228,122 @@ export class RegionNavigationController {
   }
 
   private readonly handleFocusIn = (event: Event): void => {
-    if (!this.current) {
-      return;
-    }
-    const path = event.composedPath();
-    if (!path.includes(this.current.element)) {
-      const target = path.find((item): item is HTMLElement => isHTMLElement(item));
-      if (!target || !isComposedDescendant(this.current.element, target)) {
+    const target = event
+      .composedPath()
+      .find((item): item is HTMLElement => isHTMLElement(item));
+    if (!target) {
+      if (this.current) {
         this.clearActiveRegion();
       }
+      return;
+    }
+
+    const focusedRegion = this.findContainingRegion(target);
+    if (focusedRegion) {
+      this.activateFocusedRegion(focusedRegion);
+      return;
+    }
+
+    if (this.current) {
+      this.clearActiveRegion();
     }
   };
+
+  private activateFocusedRegion(region: ScannedRegion): void {
+    if (this.current?.element === region.element) {
+      return;
+    }
+
+    this.ledger.restore();
+    this.current = region;
+    const sameType = this.getRegions(region.type);
+    const index = sameType.findIndex(
+      (candidate) => candidate.element === region.element,
+    );
+    this.currentIndex = index;
+    if (index >= 0) {
+      this.lastIndexes.set(region.type, index);
+    }
+    this.effects.setRegionHighlight(region.element);
+    if (index >= 0) {
+      this.callbacks.onRegionChange({
+        type: region.type,
+        index,
+        count: sameType.length,
+        element: region.element,
+        label: region.label,
+      });
+    }
+  }
+
+  private findContainingRegion(target: HTMLElement): ScannedRegion | null {
+    let match: ScannedRegion | null = null;
+    for (const region of this.regions) {
+      if (
+        !region.element.isConnected ||
+        !isVisible(region.element) ||
+        !isComposedDescendant(region.element, target)
+      ) {
+        continue;
+      }
+      if (
+        !match ||
+        isComposedDescendant(match.element, region.element)
+      ) {
+        match = region;
+      }
+    }
+    return match;
+  }
+
+  private reconcileRegionTabStops(): void {
+    const currentElements = new Set(
+      this.regions
+        .filter(
+          (region) => region.element.isConnected && isVisible(region.element),
+        )
+        .map((region) => region.element),
+    );
+
+    for (const element of this.tabIndexSnapshots.keys()) {
+      if (!currentElements.has(element)) {
+        this.restoreRegionTabStop(element);
+      }
+    }
+
+    for (const element of currentElements) {
+      this.ensureRegionTabStop(element);
+    }
+  }
+
+  private ensureRegionTabStop(element: HTMLElement): void {
+    if (element.tabIndex >= 0) {
+      return;
+    }
+    if (!this.tabIndexSnapshots.has(element)) {
+      this.tabIndexSnapshots.set(element, element.getAttribute("tabindex"));
+    }
+    element.setAttribute("tabindex", "0");
+  }
+
+  private restoreRegionTabStop(element: HTMLElement): void {
+    if (!this.tabIndexSnapshots.has(element)) {
+      return;
+    }
+    const original = this.tabIndexSnapshots.get(element) ?? null;
+    if (original === null) {
+      element.removeAttribute("tabindex");
+    } else {
+      element.setAttribute("tabindex", original);
+    }
+    this.tabIndexSnapshots.delete(element);
+  }
+
+  private restoreAllRegionTabStops(): void {
+    for (const element of Array.from(this.tabIndexSnapshots.keys())) {
+      this.restoreRegionTabStop(element);
+    }
+  }
 
   private getScrollBehavior(element: HTMLElement): ScrollBehavior {
     return element.ownerDocument.defaultView?.matchMedia(
@@ -247,19 +352,6 @@ export class RegionNavigationController {
       ? "auto"
       : "smooth";
   }
-}
-
-function isNaturallyFocusable(element: HTMLElement): boolean {
-  if (element.hasAttribute("disabled")) {
-    return false;
-  }
-  if (["BUTTON", "INPUT", "SELECT", "TEXTAREA", "IFRAME"].includes(element.tagName)) {
-    return true;
-  }
-  return (
-    (element.tagName === "A" || element.tagName === "AREA") &&
-    element.hasAttribute("href")
-  );
 }
 
 function isComposedDescendant(
