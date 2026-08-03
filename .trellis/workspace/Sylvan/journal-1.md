@@ -38,3 +38,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 2: 完善选项卡与关联面板朗读
+
+**Date**: 2026-08-03
+**Task**: 完善选项卡与关联面板朗读
+**Branch**: `feat/accessibility-tool-v0.1`
+
+### Summary
+
+实现选项焦点、面板进入和 Esc 返回的单次完整中文朗读；区域分类取自真实扫描结果，修复宿主自动聚焦和主动回焦竞态，补齐单元测试、双浏览器 E2E、帮助文档与运行契约。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `042ce9a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
