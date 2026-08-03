@@ -479,6 +479,8 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
       {
         isRegionContainer: (element) =>
           this.regionNavigation?.isRegionContainer(element) ?? false,
+        isTabSpeechTarget: (element) =>
+          this.tabs?.isTabSpeechTarget(element) ?? false,
       },
     );
     this.regionNavigation = new RegionNavigationController(this.effects, {
@@ -500,8 +502,13 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
       },
     });
     this.tabs = new TabsController(this.activeConfig, {
-      onAnnounce: (message) => this.announce(message),
+      onAnnounce: (message) => {
+        this.reading?.cancel();
+        this.announce(message);
+      },
       onError: (error, message) => this.reportError(error, message),
+      getRegionType: (element) =>
+        this.regionNavigation?.getContainingRegionType(element) ?? null,
     });
     this.scanner = new RegionScanner(this.activeConfig, {
       onUpdate: (regions, roots, reason) => {

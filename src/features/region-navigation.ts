@@ -156,6 +156,10 @@ export class RegionNavigationController {
     );
   }
 
+  getContainingRegionType(element: HTMLElement): RegionType | null {
+    return this.findContainingRegion(element)?.type ?? null;
+  }
+
   getCounts(): Record<RegionType, number> {
     return {
       viewport: this.getRegions("viewport").length,

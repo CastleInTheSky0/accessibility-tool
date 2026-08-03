@@ -131,6 +131,9 @@ AccessibilityTool.configure({
 - 页面原有事件负责在普通 `role="tabpanel"` 或非原生浮层上添加、移除布尔属性 `data-a11y-hidden`，不要在这些宿主面板上直接使用原生 `hidden`。
 - 工具只触发页面原事件并同步 `aria-selected` / `aria-hidden`，不直接写入 `data-a11y-hidden` 或控制业务视觉样式；`aria-hidden` 不能替代显隐属性，`data-a11y-hidden` 也不能替代无障碍状态。
 - 原生 `<dialog>` 不使用 `data-a11y-hidden`，继续由页面通过 `showModal()`、`open` 和 `close()` 控制。
+- 每个有效 `role="tab"` 获得焦点时只朗读一次完整提示：普通选项为 `Tab，{名称}，{区域分类}，当前有浮动窗口，按 ALT+下键进入窗口`，带 `href` 的 `<a role="tab">` 为 `链接：{名称}，Tab，{区域分类}，当前有浮动窗口，按 ALT+下键进入窗口`。区域分类只取扫描结果中的六类名称；无所属区域时省略该片段。
+- Alt+下进入关联面板时朗读来源选项、区域分类、Tab 遍历和 Esc 返回方法；面板没有可通过 Tab 聚焦的后代时改为提示“当前面板暂无可通过 Tab 遍历的信息”，不会给静态内容增加 `tabindex`。
+- Esc 只有在面板成功退出并将焦点返回来源选项后才朗读 `已返回{名称}选项`；返回失败时不朗读成功提示。
 
 ## 对话框关闭钩子
 

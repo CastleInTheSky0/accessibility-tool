@@ -19,6 +19,7 @@ interface ReadingStateProvider {
 
 interface ReadingTargetProvider {
   isRegionContainer: (element: HTMLElement) => boolean;
+  isTabSpeechTarget: (element: HTMLElement) => boolean;
 }
 
 export class ReadingController {
@@ -96,7 +97,10 @@ export class ReadingController {
     if (!this.state.isEnabled() || !element.isConnected || !isVisible(element)) {
       return;
     }
-    if (this.targets.isRegionContainer(element)) {
+    if (
+      this.targets.isRegionContainer(element) ||
+      this.targets.isTabSpeechTarget(element)
+    ) {
       return;
     }
     if (

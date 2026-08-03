@@ -155,7 +155,10 @@ export function getAccessibleText(element: HTMLElement): string {
   return appendElementState(element, text);
 }
 
-function getAccessibleName(element: HTMLElement): string {
+export function getAccessibleName(
+  element: HTMLElement,
+  options: { readingFallbacks?: boolean } = {},
+): string {
   for (const attribute of [
     "data-a11y-label",
     "aria-readlabel",
@@ -184,27 +187,29 @@ function getAccessibleName(element: HTMLElement): string {
     return normalizeText(title);
   }
 
-  if (
-    getElementSpeechKind(element) === "image" ||
-    element.tagName === "IMG" ||
-    element.tagName === "AREA" ||
-    (element.tagName === "INPUT" &&
-      element.getAttribute("type")?.toLowerCase() === "image")
-  ) {
-    const alt = element.getAttribute("alt");
-    if (alt?.trim()) {
-      return normalizeText(alt);
+  if (options.readingFallbacks !== false) {
+    if (
+      getElementSpeechKind(element) === "image" ||
+      element.tagName === "IMG" ||
+      element.tagName === "AREA" ||
+      (element.tagName === "INPUT" &&
+        element.getAttribute("type")?.toLowerCase() === "image")
+    ) {
+      const alt = element.getAttribute("alt");
+      if (alt?.trim()) {
+        return normalizeText(alt);
+      }
     }
-  }
 
-  const formText = getFormText(element);
-  if (formText) {
-    return formText;
-  }
+    const formText = getFormText(element);
+    if (formText) {
+      return formText;
+    }
 
-  const selection = getSelectedTextWithin(element);
-  if (selection) {
-    return selection;
+    const selection = getSelectedTextWithin(element);
+    if (selection) {
+      return selection;
+    }
   }
 
   return normalizeText(element.innerText || element.textContent || "");

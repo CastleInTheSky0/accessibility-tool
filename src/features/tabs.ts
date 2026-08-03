@@ -1,35 +1,41 @@
 import type { ResolvedAccessibilityToolConfig } from "../core/config";
+import { REGION_LABELS } from "../core/constants";
 import { DomLedger } from "../core/dom-ledger";
 import {
   createUniqueId,
+  getAccessibleName,
   getFocusableElements,
   isHTMLElement,
   isTabbable,
   isVisible,
   querySelectorAllSafe,
 } from "../core/dom";
-import type { TabActivationMode } from "../types";
+import type { RegionType, TabActivationMode } from "../types";
 
 interface TabGroup {
   root: Document | ShadowRoot;
   list: HTMLElement;
   tabs: HTMLElement[];
   panels: Map<HTMLElement, HTMLElement>;
-  announced: boolean;
 }
 
 interface TabsCallbacks {
   onAnnounce: (message: string) => void;
   onError: (error: unknown, message: string) => void;
+  getRegionType: (element: HTMLElement) => RegionType | null;
 }
 
 export class TabsController {
   private readonly ledger = new DomLedger();
   private readonly modalLedger = new DomLedger();
   private readonly groups = new Map<HTMLElement, TabGroup>();
+  private readonly handledFocusEvents = new WeakSet<Event>();
+  private readonly handledKeydownEvents = new WeakSet<Event>();
+  private readonly pendingPanelEntries = new Set<HTMLElement>();
+  private readonly pendingPanelLeaves = new Set<HTMLElement>();
+  private readonly suppressedTabFocusAnnouncements = new Set<HTMLElement>();
   private roots: readonly (Document | ShadowRoot)[] = [];
   private running = false;
-  private keyboardInput = false;
   private tabNavigationPending = false;
   private tabNavigationTimer: number | null = null;
   private activeDialog: HTMLElement | null = null;
@@ -63,6 +69,9 @@ export class TabsController {
     this.setTabNavigationPending(false);
     this.activeDialog = null;
     this.dialogOrigin = null;
+    this.pendingPanelEntries.clear();
+    this.pendingPanelLeaves.clear();
+    this.suppressedTabFocusAnnouncements.clear();
     this.modalLedger.restore();
     this.ledger.restore();
   }
@@ -87,9 +96,6 @@ export class TabsController {
     if (!this.running || !this.config.tabs.enabled) {
       return;
     }
-    const announcedGroups = new Map(
-      Array.from(this.groups, ([list, group]) => [list, group.announced]),
-    );
     this.groups.clear();
     for (const root of this.roots) {
       for (const list of querySelectorAllSafe<HTMLElement>(
@@ -98,7 +104,6 @@ export class TabsController {
       )) {
         const group = this.buildGroup(root, list);
         if (group) {
-          group.announced = announcedGroups.get(list) ?? false;
           this.groups.set(list, group);
         }
       }
@@ -180,8 +185,29 @@ export class TabsController {
       list,
       tabs,
       panels,
-      announced: false,
     };
+  }
+
+  isTabSpeechTarget(element: HTMLElement): boolean {
+    const tab = element.closest<HTMLElement>('[role="tab"]');
+    const group = tab ? this.findGroup(tab) : null;
+    if (tab && group?.tabs.includes(tab)) {
+      return true;
+    }
+    for (const candidate of this.groups.values()) {
+      if (Array.from(candidate.panels.values()).includes(element)) {
+        return true;
+      }
+    }
+    for (const panel of [
+      ...this.pendingPanelEntries,
+      ...this.pendingPanelLeaves,
+    ]) {
+      if (isComposedDescendant(panel, element)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private attachRoots(): void {
@@ -203,7 +229,6 @@ export class TabsController {
   }
 
   private readonly handlePointerDown = (): void => {
-    this.keyboardInput = false;
     this.setTabNavigationPending(false);
   };
 
@@ -224,16 +249,26 @@ export class TabsController {
   };
 
   private readonly handleFocusIn = (event: Event): void => {
-    const tab = getPathElement(event, '[role="tab"]');
+    if (this.handledFocusEvents.has(event)) {
+      return;
+    }
+    this.handledFocusEvents.add(event);
+    const focusedElement = getPathElement(event, "*");
+    const tab = focusedElement?.closest<HTMLElement>('[role="tab"]') ?? null;
     const reachedByTab = this.tabNavigationPending;
     this.setTabNavigationPending(false);
-    if (!tab) {
+    if (!tab || focusedElement !== tab) {
       return;
     }
     const group = this.findGroup(tab);
-    if (group && this.keyboardInput && !group.announced) {
-      group.announced = true;
-      this.callbacks.onAnnounce("有关联内容面板，按 Alt+下方向键进入");
+    if (group && !this.suppressedTabFocusAnnouncements.has(tab)) {
+      this.callbacks.onAnnounce(
+        formatTabFocusAnnouncement(
+          getTabName(tab),
+          this.callbacks.getRegionType(tab),
+          isLinkTab(tab),
+        ),
+      );
     }
     if (
       group &&
@@ -246,8 +281,11 @@ export class TabsController {
   };
 
   private readonly handleKeydown = (event: Event): void => {
+    if (this.handledKeydownEvents.has(event)) {
+      return;
+    }
+    this.handledKeydownEvents.add(event);
     const keyboardEvent = event as KeyboardEvent;
-    this.keyboardInput = true;
     this.setTabNavigationPending(
       keyboardEvent.key === "Tab" &&
         !keyboardEvent.altKey &&
@@ -424,46 +462,77 @@ export class TabsController {
 
   private async enterPanel(group: TabGroup, tab: HTMLElement): Promise<void> {
     const panel = group.panels.get(tab);
-    if (!panel) {
+    if (!panel || this.pendingPanelEntries.has(panel)) {
       return;
     }
-    if (!isVisible(panel)) {
-      this.activateTab(group, tab);
-    }
-    const ready = await waitUntilVisible(
-      panel,
-      this.config.tabs.panelReadyTimeoutMs,
-    );
-    if (!ready) {
-      this.callbacks.onAnnounce("关联内容面板未能打开");
-      this.report(
-        new Error("Panel readiness timeout"),
-        `等待关联面板 #${panel.id} 显示超时。`,
+    this.pendingPanelEntries.add(panel);
+    try {
+      if (!isVisible(panel)) {
+        this.activateTab(group, tab);
+      }
+      const ready = await waitUntilVisible(
+        panel,
+        this.config.tabs.panelReadyTimeoutMs,
       );
-      return;
-    }
-    if (!isTabbable(panel) && !panel.hasAttribute("tabindex")) {
-      this.setAttribute(panel, "tabindex", "-1");
-    }
-    panel.focus();
-    if (this.isDialog(panel)) {
-      this.activeDialog = panel;
-      this.dialogOrigin = tab;
-      this.manageModalBackground(panel, true);
+      if (!ready) {
+        this.callbacks.onAnnounce("关联内容面板未能打开");
+        this.report(
+          new Error("Panel readiness timeout"),
+          `等待关联面板 #${panel.id} 显示超时。`,
+        );
+        return;
+      }
+      if (!isTabbable(panel) && !panel.hasAttribute("tabindex")) {
+        this.setAttribute(panel, "tabindex", "-1");
+      }
+      const hasTabbableContent = getFocusableElements(panel).length > 0;
+      panel.focus();
+      if (!isElementFocused(panel)) {
+        return;
+      }
+      if (this.isDialog(panel)) {
+        this.activeDialog = panel;
+        this.dialogOrigin = tab;
+        this.manageModalBackground(panel, true);
+      }
+      this.callbacks.onAnnounce(
+        formatPanelEntryAnnouncement(
+          getTabName(tab),
+          this.callbacks.getRegionType(tab),
+          hasTabbableContent,
+        ),
+      );
+    } finally {
+      this.pendingPanelEntries.delete(panel);
     }
   }
 
   private async leavePanel(panel: HTMLElement, tab: HTMLElement): Promise<void> {
-    if (this.isDialog(panel)) {
-      const closed = await this.closeDialog(panel);
-      if (!closed) {
-        return;
-      }
+    if (this.pendingPanelLeaves.has(panel)) {
+      return;
     }
-    this.manageModalBackground(panel, false);
-    this.activeDialog = null;
-    this.dialogOrigin = null;
-    tab.focus();
+    this.pendingPanelLeaves.add(panel);
+    this.suppressedTabFocusAnnouncements.add(tab);
+    try {
+      if (this.isDialog(panel)) {
+        const closed = await this.closeDialog(panel);
+        if (!closed) {
+          return;
+        }
+      }
+      this.manageModalBackground(panel, false);
+      this.activeDialog = null;
+      this.dialogOrigin = null;
+      tab.focus();
+      if (isElementFocused(tab)) {
+        this.callbacks.onAnnounce(
+          formatPanelReturnAnnouncement(getTabName(tab)),
+        );
+      }
+    } finally {
+      this.suppressedTabFocusAnnouncements.delete(tab);
+      this.pendingPanelLeaves.delete(panel);
+    }
   }
 
   private async closeDialog(dialog: HTMLElement): Promise<boolean> {
@@ -472,18 +541,18 @@ export class TabsController {
       if (nativeDialog.open) {
         nativeDialog.close();
       }
-      return true;
+      return !nativeDialog.open;
     }
     const closeButton = dialog.querySelector<HTMLElement>(
       "[data-a11y-dialog-close]",
     );
     if (closeButton) {
       closeButton.click();
-      return true;
+      return waitUntilHidden(dialog, this.config.tabs.panelReadyTimeoutMs);
     }
     if (this.config.tabs.closeDialog) {
       await this.config.tabs.closeDialog(dialog);
-      return true;
+      return waitUntilHidden(dialog, this.config.tabs.panelReadyTimeoutMs);
     }
     this.callbacks.onAnnounce("当前浮动窗口没有可用的关闭方式");
     this.report(
@@ -629,6 +698,73 @@ export class TabsController {
   }
 }
 
+export function formatTabFocusAnnouncement(
+  name: string,
+  regionType: RegionType | null,
+  link: boolean,
+): string {
+  const prefix = link ? `链接：${name}，Tab` : `Tab，${name}`;
+  const region = regionType ? `，${REGION_LABELS[regionType]}` : "";
+  return `${prefix}${region}，当前有浮动窗口，按 ALT+下键进入窗口`;
+}
+
+export function formatPanelEntryAnnouncement(
+  tabName: string,
+  regionType: RegionType | null,
+  hasTabbableContent: boolean,
+): string {
+  const region = regionType ? REGION_LABELS[regionType] : "";
+  const traversal = hasTabbableContent
+    ? "按 Tab 键遍历信息"
+    : "当前面板暂无可通过 Tab 遍历的信息";
+  return `您已进入${tabName}${region}标签面板，${traversal}，按 Esc 键退出面板并返回${tabName}选项`;
+}
+
+export function formatPanelReturnAnnouncement(tabName: string): string {
+  return `已返回${tabName}选项`;
+}
+
+function getTabName(tab: HTMLElement): string {
+  return getAccessibleName(tab, { readingFallbacks: false });
+}
+
+function isLinkTab(tab: HTMLElement): boolean {
+  return tab.tagName === "A" && tab.hasAttribute("href");
+}
+
+function isElementFocused(element: HTMLElement): boolean {
+  const root = element.getRootNode();
+  return "activeElement" in root && root.activeElement === element;
+}
+
+function isComposedDescendant(
+  container: HTMLElement,
+  target: HTMLElement,
+): boolean {
+  let current: HTMLElement | null = target;
+  while (current) {
+    if (current === container || container.contains(current)) {
+      return true;
+    }
+    const root = current.getRootNode();
+    if ("host" in root && isHTMLElement(root.host)) {
+      current = root.host;
+      continue;
+    }
+    if (root.nodeType === 9) {
+      try {
+        const frame = (root as Document).defaultView?.frameElement;
+        current = isHTMLElement(frame) ? frame : null;
+        continue;
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+  return false;
+}
+
 function findElementsById(
   root: Document | ShadowRoot,
   id: string,
@@ -657,6 +793,30 @@ async function waitUntilVisible(
   return new Promise((resolve) => {
     const poll = (): void => {
       if (isVisible(element)) {
+        resolve(true);
+        return;
+      }
+      if (!element.isConnected || performance.now() - started >= timeoutMs) {
+        resolve(false);
+        return;
+      }
+      window.setTimeout(poll, 40);
+    };
+    poll();
+  });
+}
+
+async function waitUntilHidden(
+  element: HTMLElement,
+  timeoutMs: number,
+): Promise<boolean> {
+  if (!isVisible(element)) {
+    return true;
+  }
+  const started = performance.now();
+  return new Promise((resolve) => {
+    const poll = (): void => {
+      if (!isVisible(element)) {
         resolve(true);
         return;
       }
