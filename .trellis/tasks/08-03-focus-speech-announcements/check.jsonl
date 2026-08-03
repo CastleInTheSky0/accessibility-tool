@@ -1,0 +1,2 @@
+{"file":".trellis/spec/frontend/accessibility-tool-contract.md","reason":"Verify region entry speech is unified across navigation and ordinary focus without duplicate announcements or runtime regressions."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Verify focused unit coverage and the required typecheck, lint, test, build, and relevant E2E gates."}

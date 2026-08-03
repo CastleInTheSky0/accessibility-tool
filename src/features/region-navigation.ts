@@ -51,6 +51,7 @@ export class RegionNavigationController {
   private current: ScannedRegion | null = null;
   private currentIndex = -1;
   private roots: readonly (Document | ShadowRoot)[] = [];
+  private suppressedFocusAnnouncement: HTMLElement | null = null;
   private started = false;
 
   constructor(
@@ -146,6 +147,15 @@ export class RegionNavigationController {
     return true;
   }
 
+  isRegionContainer(element: HTMLElement): boolean {
+    return this.regions.some(
+      (region) =>
+        region.element === element &&
+        region.element.isConnected &&
+        isVisible(region.element),
+    );
+  }
+
   getCounts(): Record<RegionType, number> {
     return {
       viewport: this.getRegions("viewport").length,
@@ -190,7 +200,12 @@ export class RegionNavigationController {
       "scroll-margin-top",
       `${this.callbacks.getToolbarOffset() + 16}px`,
     );
-    element.focus({ preventScroll: true });
+    this.suppressedFocusAnnouncement = element;
+    try {
+      element.focus({ preventScroll: true });
+    } finally {
+      this.suppressedFocusAnnouncement = null;
+    }
     element.scrollIntoView({
       block: "start",
       inline: "nearest",
@@ -198,9 +213,7 @@ export class RegionNavigationController {
     });
 
     if (announceEntry) {
-      const entryLabel = `${region.label}${REGION_LABELS[region.type]}`;
-      const message = `提示：您已进入${entryLabel}，按下 Tab 键浏览信息；第 ${index + 1} 个，共 ${count} 个`;
-      this.callbacks.onAnnounce(message);
+      this.announceRegionEntry(region, index, count);
     }
     this.callbacks.onRegionChange({
       type: region.type,
@@ -266,7 +279,11 @@ export class RegionNavigationController {
 
     const focusedRegion = this.findContainingRegion(target);
     if (focusedRegion) {
-      this.activateFocusedRegion(focusedRegion);
+      this.activateFocusedRegion(
+        focusedRegion,
+        target === focusedRegion.element &&
+          target !== this.suppressedFocusAnnouncement,
+      );
       return;
     }
 
@@ -275,23 +292,25 @@ export class RegionNavigationController {
     }
   };
 
-  private activateFocusedRegion(region: ScannedRegion): void {
-    if (this.current?.element === region.element) {
-      return;
-    }
-
-    this.ledger.restore();
-    this.current = region;
+  private activateFocusedRegion(
+    region: ScannedRegion,
+    announceEntry: boolean,
+  ): void {
+    const isCurrent = this.current?.element === region.element;
     const sameType = this.getRegions(region.type);
     const index = sameType.findIndex(
       (candidate) => candidate.element === region.element,
     );
-    this.currentIndex = index;
-    if (index >= 0) {
-      this.lastIndexes.set(region.type, index);
+    if (!isCurrent) {
+      this.ledger.restore();
+      this.current = region;
+      this.currentIndex = index;
+      if (index >= 0) {
+        this.lastIndexes.set(region.type, index);
+      }
+      this.effects.setRegionHighlight(region.element);
     }
-    this.effects.setRegionHighlight(region.element);
-    if (index >= 0) {
+    if (!isCurrent && index >= 0) {
       this.callbacks.onRegionChange({
         type: region.type,
         index,
@@ -300,6 +319,20 @@ export class RegionNavigationController {
         label: region.label,
       });
     }
+    if (announceEntry && index >= 0) {
+      this.announceRegionEntry(region, index, sameType.length);
+    }
+  }
+
+  private announceRegionEntry(
+    region: ScannedRegion,
+    index: number,
+    count: number,
+  ): void {
+    const entryLabel = `${region.label}${REGION_LABELS[region.type]}`;
+    this.callbacks.onAnnounce(
+      `提示：您已进入${entryLabel}，按下 Tab 键浏览信息；第 ${index + 1} 个，共 ${count} 个`,
+    );
   }
 
   private findContainingRegion(target: HTMLElement): ScannedRegion | null {

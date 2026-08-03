@@ -17,6 +17,10 @@ interface ReadingStateProvider {
   getRate: () => number;
 }
 
+interface ReadingTargetProvider {
+  isRegionContainer: (element: HTMLElement) => boolean;
+}
+
 export class ReadingController {
   private readonly roots = new Set<ReadingRoot>();
   private readonly documents = new Set<Document>();
@@ -32,6 +36,7 @@ export class ReadingController {
     private readonly speech: SpeechController,
     private readonly effects: PageEffectsController,
     private readonly state: ReadingStateProvider,
+    private readonly targets: ReadingTargetProvider,
   ) {}
 
   updateConfig(config: ResolvedAccessibilityToolConfig): void {
@@ -89,6 +94,9 @@ export class ReadingController {
 
   speakElement(element: HTMLElement, force = false): void {
     if (!this.state.isEnabled() || !element.isConnected || !isVisible(element)) {
+      return;
+    }
+    if (this.targets.isRegionContainer(element)) {
       return;
     }
     if (

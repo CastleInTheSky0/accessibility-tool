@@ -43,10 +43,12 @@ describe("RegionNavigationController", () => {
     const first = get("service-a");
     const second = get("service-b");
     const effects = createEffects();
-    const controller = createController(effects);
+    const announce = vi.fn();
+    const controller = createController(effects, announce);
     controller.start();
     controller.update([region(first), region(second)], [document], "initial");
     controller.navigate("service");
+    announce.mockClear();
 
     controller.update(
       [
@@ -59,6 +61,7 @@ describe("RegionNavigationController", () => {
 
     expect(document.activeElement).toBe(second);
     expect(effects.setRegionHighlight).toHaveBeenLastCalledWith(second);
+    expect(announce).not.toHaveBeenCalled();
     controller.stop();
   });
 
@@ -124,7 +127,7 @@ describe("RegionNavigationController", () => {
     expect(first.style.getPropertyValue("scroll-margin-top")).toBe("24px");
   });
 
-  it("activates a recognized region reached through ordinary focus", () => {
+  it("announces a region container reached through ordinary or reverse focus", () => {
     document.body.innerHTML = `
       <nav id="service-a">
         <a id="inside" href="#inside">内部链接</a>
@@ -141,11 +144,20 @@ describe("RegionNavigationController", () => {
 
     activeRegion.focus();
     expect(effects.setRegionHighlight).toHaveBeenLastCalledWith(activeRegion);
-    expect(announce).not.toHaveBeenCalled();
+    expect(announce).toHaveBeenCalledWith(
+      "提示：您已进入service-a服务区，按下 Tab 键浏览信息；第 1 个，共 1 个",
+    );
 
     effects.clearRegionHighlight.mockClear();
     get("inside").focus();
     expect(effects.clearRegionHighlight).not.toHaveBeenCalled();
+    expect(announce).toHaveBeenCalledTimes(1);
+
+    activeRegion.focus();
+    expect(announce).toHaveBeenCalledTimes(2);
+    expect(announce).toHaveBeenLastCalledWith(
+      "提示：您已进入service-a服务区，按下 Tab 键浏览信息；第 1 个，共 1 个",
+    );
 
     get("outside").focus();
     expect(effects.clearRegionHighlight).toHaveBeenCalledTimes(1);
@@ -179,6 +191,7 @@ describe("RegionNavigationController", () => {
 
     controller.navigate("viewport");
 
+    expect(announce).toHaveBeenCalledTimes(1);
     expect(announce).toHaveBeenCalledWith(
       "提示：您已进入要闻视窗区，按下 Tab 键浏览信息；第 1 个，共 2 个",
     );
@@ -187,6 +200,7 @@ describe("RegionNavigationController", () => {
     );
 
     controller.navigate("viewport");
+    expect(announce).toHaveBeenCalledTimes(2);
     expect(announce).toHaveBeenNthCalledWith(
       2,
       "提示：您已进入专题视窗区，按下 Tab 键浏览信息；第 2 个，共 2 个",
@@ -232,6 +246,7 @@ describe("RegionNavigationController", () => {
       3,
       "提示：您已进入 要闻 视窗区，按下 Tab 键浏览信息；第 1 个，共 1 个",
     );
+    expect(announce).toHaveBeenCalledTimes(3);
     controller.stop();
   });
 

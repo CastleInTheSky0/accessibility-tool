@@ -98,7 +98,9 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 
 - Region source priority is `regions.selectors` > `data-a11y-region` > legacy `aria-role` > semantic detection.
 - Region label priority is `data-a11y-label` > legacy `aria-readlabel` > `aria-label` > `aria-labelledby` > first visible heading > category label.
-- `data-a11y-label` and legacy `aria-readlabel` remain integration-provided short names such as `要闻`; integrations do not provide the complete spoken instruction. Shortcut/category navigation must literally concatenate `label + REGION_LABELS[type]` without trimming, semantic correction, or category deduplication, then announce `提示：您已进入<名称与分类>，按下 Tab 键浏览信息；第 N 个，共 M 个`. Therefore `主导航` + `导航区` produces `主导航导航区`, and `正文区` + `正文区` produces `正文区正文区`. Focus-driven region activation from ordinary Tab, pointer, or script and automatic mutation recovery do not emit this entry announcement, and `RegionChangeEvent.label` remains the unmodified scanner-resolved label.
+- `data-a11y-label` and legacy `aria-readlabel` remain integration-provided short names such as `要闻`; integrations do not provide the complete spoken instruction. Every exact region-container focus caused by shortcut/category navigation, Tab, Shift+Tab, pointer, script, or return from a descendant must literally concatenate `label + REGION_LABELS[type]` without trimming, semantic correction, or category deduplication and announce `提示：您已进入<名称与分类>，按下 Tab 键浏览信息；第 N 个，共 M 个`. Controller-owned focus suppresses its synchronous `focusin` duplicate but still announces once. Automatic mutation/reclassification recovery keeps that focus announcement suppressed. Focusing a descendant does not repeat the region instruction, and `RegionChangeEvent.label` remains the unmodified scanner-resolved label.
+- When reading is enabled, ordinary focus speech must consult the region controller's exact-container predicate and skip recognized region containers so it cannot duplicate or overwrite the complete region instruction. This coordination must be correct regardless of `focusin` listener registration order; descendant element reading and the independent active-region highlight remain intact.
+- Element speech resolves the first non-empty value in this fixed order: `data-a11y-label` > legacy `aria-readlabel` > `aria-label` > `aria-labelledby` > `title` > applicable `alt` (`img`, `area`, and image inputs) > form labels and value/current option > a text selection contained by that same element > visible text. A selection elsewhere in the document must never override the focused or pointed element. Native elements and equivalent ARIA roles share the same formatting: new-window links `打开新窗口链接，<名称>`, links/areas `链接，<名称>`, images `图片，<描述>`, buttons (including button-like inputs) `按钮，<名称>`, checkboxes `复选框，<名称>`, radios `单选框，<名称>`, and selects/comboboxes/listboxes `下拉框，<名称或当前选项>`. An unnamed ARIA combobox/listbox resolves its current option from a valid `aria-activedescendant`, then from a descendant `role="option"[aria-selected="true"]`. Every other readable element uses `文本：<内容>`. Existing checked, pressed, expanded, selected, disabled, and current states append after the content; `aria-current="false"` is explicitly not current.
 - While open, every host-page focus source (Tab, Shift+Tab, pointer, script, or region navigation) applies a reversible `2px solid #ffb800 !important` outline to the real focused node. Toolbar-internal focus keeps the toolbar's own Shadow DOM treatment and must not receive page focus ownership.
 - Reading retains the Shadow Root `.a11y-highlight` overlay. Active blind-path regions and current page focus instead use separate node-owned ledgers; clearing one owner must not clear the other or the reading overlay.
 - While open, the region controller reconciles every visible recognized region into the native Tab sequence. Any region container whose current `tabIndex` is negative receives temporary `tabindex="0"`; its exact prior attribute value is restored when the region is no longer recognized, becomes invalid, or the tool closes/destroys.
@@ -124,8 +126,8 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 | Unknown `data-a11y-region` / legacy value | Ignore the element as an explicit region, report once per value, and continue scanning. |
 | Hidden, inert, or `aria-hidden="true"` region | Exclude it from counts and navigation. |
 | Current region removed, hidden, or reclassified | Move to the next same-type region with wraparound; otherwise return focus to the category control. |
-| Region container is the current focused element | Show only the yellow focus outline; the yellow owner overrides the underlying orange region owner. |
-| Focus moves to a descendant of the active region | Restore the outer region to deep orange and move the yellow focus outline to the descendant. |
+| Region container is the current focused element | Show only the yellow focus outline; the yellow owner overrides the underlying orange region owner. When reading is enabled, announce exactly one complete region-entry instruction. |
+| Focus moves to a descendant of the active region | Restore the outer region to deep orange, move the yellow focus outline to the descendant, and read only the descendant semantics without repeating the region instruction. |
 | Focus leaves the active region or enters the toolbar | Restore the region's exact outline, `aria-regionactive`, and navigation scroll margin without changing the browser's native focus destination; keep its temporary region tab stop until the region becomes invalid or the tool closes. |
 | Visible recognized region is added, removed, hidden, or reclassified | Reconcile region-container `tabindex="0"` ownership and restore the exact prior value for every element that leaves the recognized set. |
 | Visible standalone ARIA control has no native focusability or author `tabindex` | Temporarily add `tabindex="0"`; restore it when the role is removed, the node becomes hidden/disabled/ignored, or the tool closes. Never auto-tab static `p`/`span`/heading/list/`img` content by tag name. |
@@ -139,6 +141,8 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 | Automatic restoration races with explicit open/close | Serialize the pending open. Explicit open retains trigger/focus/announcement semantics; close waits for the pending restoration, then closes and clears intent. |
 | `localStorage` is unavailable | Continue with in-page memory and no exception. Cross-refresh restoration is unavailable by design. |
 | Stale speech callback after interruption | Ignore it; do not emit a false `error` or `speechend` for the canceled request. |
+| Page selection is outside the reading target | Ignore that selection and continue the target's documented name fallback; never read unrelated selected text. |
+| Unnamed ARIA combobox/listbox has no valid active or selected option | Keep the semantic-only `下拉框` fallback; do not read an unrelated option or throw. |
 | Cross-origin iframe | Never read its document; treat the iframe element as atomic only when explicitly configured or marked. |
 | External code replaces `history.pushState` after open | Do not overwrite the newer integration when the tool stops. |
 
@@ -153,9 +157,9 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 - Unit: config deep merge and immutable feature order.
 - Unit: preference and independent open-state storage validation, version rejection, clear, and unavailable-storage fallback.
 - Unit: successful open/close/destroy/reset intent lifecycle, disabled persistence, storage-key migration, failed-open cleanup, silent final-config restoration, and explicit-open/close races with pending restoration.
-- Unit: accessible-name priority, control state text, hidden content, and Shadow Root `aria-labelledby`.
+- Unit: accessible-name empty-value fallback and fixed priority, target-contained versus unrelated selections, area/image-input `alt`, unnamed ARIA select current-option fallback, native/equivalent-ARIA semantic prefixes, generic `文本：` output, `aria-current="false"`, control state text, hidden content, and Shadow Root `aria-labelledby`.
 - Unit: region source priority, numeric/English/legacy mapping, semantic-off mode, open Shadow Roots, safe history restoration, current-region wrap and reclassification recovery.
-- Unit: every visible recognized region receives a reversible Tab anchor; ordinary focus auto-activates the containing region; reading overlay, active-region owner, and current-focus owner remain independent; region focus is yellow, descendant focus restores the region to orange, and values/priorities restore exactly.
+- Unit: every visible recognized region receives a reversible Tab anchor; shortcut and ordinary/reverse/programmatic container focus announce the same instruction once; listener-order-independent reading coordination skips the container but reads descendants; reading overlay, active-region owner, and current-focus owner remain independent; region focus is yellow, descendant focus restores the region to orange, and values/priorities restore exactly.
 - Unit: per-option automatic/manual tabs, target-option focus activation, current-option Enter/Space activation, trigger-event fallback/deduplication, host-owned `data-a11y-hidden` panels without native `hidden`, panel entry/Escape return, and non-modal dialog focus behavior.
 - Unit: interrupted speech must not emit stale errors.
 - Unit: hidden features must be consistent between main and read-screen toolbars.
@@ -195,6 +199,10 @@ document.querySelector(".toolbar").style.cssText = customCss;
 ```ts
 // One shared overlay lets reading cleanup erase blind-path context.
 effects.setHighlight(activeRegion);
+
+// Generic reading can cancel the complete region instruction and loses the
+// requested semantic wording for links, images, controls, and plain text.
+speech.speak(`文本：${element.textContent ?? ""}`, locale, rate);
 
 // Reorders the host page instead of following its native focus model.
 for (const [index, item] of descendants.entries()) {
@@ -262,4 +270,14 @@ activeRegion.focus({ preventScroll: true });
 
 // Do not intercept Tab: the browser enters native focusable descendants in
 // DOM order while the region controller keeps the composed-tree context.
+
+// Region containers own the complete entry instruction; ordinary reading
+// skips that exact container and formats every descendant by its semantics.
+if (!regionNavigation.isRegionContainer(element)) {
+  speech.speak(
+    getAccessibleText(element),
+    getElementLanguage(element),
+    rate,
+  );
+}
 ```

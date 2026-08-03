@@ -41,6 +41,13 @@ const READABLE_SELECTOR = [
   "figcaption",
   "td",
   "th",
+  "[role~='link']",
+  "[role~='img']",
+  "[role~='button']",
+  "[role~='checkbox']",
+  "[role~='radio']",
+  "[role~='combobox']",
+  "[role~='listbox']",
 ].join(",");
 
 export function isEditableTarget(target: EventTarget | null): boolean {
@@ -143,17 +150,21 @@ export function shouldIgnoreReadingTarget(
 }
 
 export function getAccessibleText(element: HTMLElement): string {
-  const selection = element.ownerDocument.getSelection?.()?.toString().trim();
-  if (selection) {
-    return normalizeText(selection);
-  }
+  const name = getAccessibleName(element);
+  const text = formatElementSpeech(element, name);
+  return appendElementState(element, text);
+}
 
-  const explicit =
-    element.getAttribute("data-a11y-label") ??
-    element.getAttribute("aria-readlabel") ??
-    element.getAttribute("aria-label");
-  if (explicit?.trim()) {
-    return appendElementState(element, normalizeText(explicit));
+function getAccessibleName(element: HTMLElement): string {
+  for (const attribute of [
+    "data-a11y-label",
+    "aria-readlabel",
+    "aria-label",
+  ]) {
+    const value = element.getAttribute(attribute);
+    if (value?.trim()) {
+      return normalizeText(value);
+    }
   }
 
   const labelledBy = element.getAttribute("aria-labelledby");
@@ -164,14 +175,42 @@ export function getAccessibleText(element: HTMLElement): string {
       .map((id) => getElementById(root, id)?.textContent ?? "")
       .join(" ");
     if (text.trim()) {
-      return appendElementState(element, normalizeText(text));
+      return normalizeText(text);
     }
   }
 
-  if (element.tagName === "IMG") {
-    return normalizeText((element as HTMLImageElement).alt);
+  const title = element.getAttribute("title");
+  if (title?.trim()) {
+    return normalizeText(title);
   }
 
+  if (
+    getElementSpeechKind(element) === "image" ||
+    element.tagName === "IMG" ||
+    element.tagName === "AREA" ||
+    (element.tagName === "INPUT" &&
+      element.getAttribute("type")?.toLowerCase() === "image")
+  ) {
+    const alt = element.getAttribute("alt");
+    if (alt?.trim()) {
+      return normalizeText(alt);
+    }
+  }
+
+  const formText = getFormText(element);
+  if (formText) {
+    return formText;
+  }
+
+  const selection = getSelectedTextWithin(element);
+  if (selection) {
+    return selection;
+  }
+
+  return normalizeText(element.innerText || element.textContent || "");
+}
+
+function getFormText(element: HTMLElement): string {
   if (["INPUT", "TEXTAREA", "SELECT"].includes(element.tagName)) {
     const field = element as
       | HTMLInputElement
@@ -191,18 +230,127 @@ export function getAccessibleText(element: HTMLElement): string {
       fieldType === "checkbox" || fieldType === "radio"
         ? ""
         : element.tagName === "SELECT"
-        ? (element as HTMLSelectElement).selectedOptions[0]?.textContent ?? ""
-        : field.value || element.getAttribute("placeholder") || "";
-    return appendElementState(
-      element,
-      normalizeText(`${labelText} ${value}`),
-    );
+          ? (element as HTMLSelectElement).selectedOptions[0]?.textContent ?? ""
+          : field.value || element.getAttribute("placeholder") || "";
+    return normalizeText(`${labelText} ${value}`);
   }
 
-  return appendElementState(
-    element,
-    normalizeText(element.innerText || element.textContent || ""),
+  if (getElementSpeechKind(element) !== "select") {
+    return "";
+  }
+
+  const root = element.getRootNode();
+  const activeId = element.getAttribute("aria-activedescendant")?.trim();
+  const activeOption = activeId ? getElementById(root, activeId) : null;
+  if (activeOption && activeOption !== element) {
+    const activeName = getAccessibleName(activeOption);
+    if (activeName) {
+      return activeName;
+    }
+  }
+
+  const selectedOption = Array.from(
+    element.querySelectorAll<HTMLElement>("[role~='option']"),
+  ).find(
+    (option) =>
+      option.getAttribute("aria-selected")?.trim().toLowerCase() === "true",
   );
+  return selectedOption ? getAccessibleName(selectedOption) : "";
+}
+
+function formatElementSpeech(element: HTMLElement, name: string): string {
+  switch (getElementSpeechKind(element)) {
+    case "link":
+      return withSemanticPrefix(
+        element.getAttribute("target")?.trim().toLowerCase() === "_blank"
+          ? "打开新窗口链接"
+          : "链接",
+        name,
+      );
+    case "image":
+      return withSemanticPrefix("图片", name);
+    case "button":
+      return withSemanticPrefix("按钮", name);
+    case "checkbox":
+      return withSemanticPrefix("复选框", name);
+    case "radio":
+      return withSemanticPrefix("单选框", name);
+    case "select":
+      return withSemanticPrefix("下拉框", name);
+    case "text":
+      return name ? `文本：${name}` : "";
+  }
+}
+
+function getElementSpeechKind(
+  element: HTMLElement,
+): "link" | "image" | "button" | "checkbox" | "radio" | "select" | "text" {
+  const role = element
+    .getAttribute("role")
+    ?.trim()
+    .split(/\s+/)[0]
+    ?.toLowerCase();
+  switch (role) {
+    case "link":
+    case "img":
+    case "button":
+    case "checkbox":
+    case "radio":
+      return role === "img" ? "image" : role;
+    case "combobox":
+    case "listbox":
+      return "select";
+  }
+
+  const inputType = element.getAttribute("type")?.toLowerCase();
+  if (element.tagName === "INPUT" && inputType === "checkbox") {
+    return "checkbox";
+  }
+  if (element.tagName === "INPUT" && inputType === "radio") {
+    return "radio";
+  }
+  if (element.tagName === "SELECT") {
+    return "select";
+  }
+  if (
+    element.tagName === "BUTTON" ||
+    (element.tagName === "INPUT" &&
+      ["button", "submit", "reset", "image"].includes(inputType ?? ""))
+  ) {
+    return "button";
+  }
+  if (
+    (element.tagName === "A" || element.tagName === "AREA") &&
+    element.hasAttribute("href")
+  ) {
+    return "link";
+  }
+  if (element.tagName === "IMG") {
+    return "image";
+  }
+  return "text";
+}
+
+function withSemanticPrefix(prefix: string, name: string): string {
+  return name ? `${prefix}，${name}` : prefix;
+}
+
+function getSelectedTextWithin(element: HTMLElement): string {
+  const selection = element.ownerDocument.getSelection?.();
+  const text = selection?.toString().trim();
+  if (!selection || !text || selection.rangeCount === 0) {
+    return "";
+  }
+  for (let index = 0; index < selection.rangeCount; index += 1) {
+    try {
+      if (element.contains(selection.getRangeAt(index).commonAncestorContainer)) {
+        return normalizeText(text);
+      }
+    } catch {
+      return "";
+    }
+  }
+  return "";
 }
 
 export function getElementLanguage(element: Element): string {
@@ -267,7 +415,7 @@ function appendElementState(element: HTMLElement, text: string): string {
   }
   const states: string[] = [];
   const checked =
-    element.getAttribute("aria-checked") ??
+    element.getAttribute("aria-checked")?.trim().toLowerCase() ??
     (["checkbox", "radio"].includes(
       (element.getAttribute("type") ?? "").toLowerCase(),
     )
@@ -281,31 +429,35 @@ function appendElementState(element: HTMLElement, text: string): string {
     states.push("部分选中");
   }
 
-  const pressed = element.getAttribute("aria-pressed");
+  const pressed = element.getAttribute("aria-pressed")?.trim().toLowerCase();
   if (pressed === "true") {
     states.push("已按下");
   } else if (pressed === "false") {
     states.push("未按下");
   }
 
-  const expanded = element.getAttribute("aria-expanded");
+  const expanded = element.getAttribute("aria-expanded")?.trim().toLowerCase();
   if (expanded === "true") {
     states.push("已展开");
   } else if (expanded === "false") {
     states.push("已收起");
   }
 
-  const selected = element.getAttribute("aria-selected");
+  const selected = element.getAttribute("aria-selected")?.trim().toLowerCase();
   if (selected === "true") {
     states.push("已选中");
   } else if (selected === "false") {
     states.push("未选中");
   }
 
-  if (element.hasAttribute("disabled") || element.getAttribute("aria-disabled") === "true") {
+  if (
+    element.matches(":disabled") ||
+    element.getAttribute("aria-disabled")?.trim().toLowerCase() === "true"
+  ) {
     states.push("不可用");
   }
-  if (element.hasAttribute("aria-current")) {
+  const current = element.getAttribute("aria-current")?.trim().toLowerCase();
+  if (current && current !== "false") {
     states.push("当前项");
   }
   return normalizeText([text, ...new Set(states)].join("，"));

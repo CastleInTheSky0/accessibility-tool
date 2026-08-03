@@ -476,6 +476,10 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
         isEnabled: () => this.state.isOpen && this.state.readingEnabled,
         getRate: () => this.state.speechRate,
       },
+      {
+        isRegionContainer: (element) =>
+          this.regionNavigation?.isRegionContainer(element) ?? false,
+      },
     );
     this.regionNavigation = new RegionNavigationController(this.effects, {
       getToolbarOffset: () =>
@@ -483,7 +487,10 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
           ? 12
           : this.ui?.getToolbarHeight() ?? 102,
       onCountsChange: (counts) => this.ui?.setRegionCounts(counts),
-      onAnnounce: (message) => this.announce(message),
+      onAnnounce: (message) => {
+        this.reading?.cancel();
+        this.announce(message);
+      },
       onRegionChange: (event) => this.emitter.emit("regionchange", event),
       onReturnToCategory: (type) => this.ui?.focusAction(`region:${type}`),
       onDynamicUpdate: () => {
