@@ -1,0 +1,3 @@
+{"file":".trellis/spec/frontend/accessibility-tool-contract.md","reason":"Verify dev changes do not regress build/preview outputs or demo runtime contracts."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Verify code quality, test coverage, and required checks."}
+{"file":".trellis/tasks/08-03-public-dev-hmr/research/vite-public-dev-root.md","reason":"Check the implementation and browser behavior against the chosen Vite development approach."}

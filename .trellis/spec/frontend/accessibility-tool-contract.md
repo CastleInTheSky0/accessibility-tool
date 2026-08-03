@@ -49,6 +49,12 @@ dist/accessibility-tool.css     -> external CSP stylesheet
 dist/index.d.ts                  -> public TypeScript entry declaration
 ```
 
+Development serving is isolated from those build signatures:
+
+- A true Vite dev server (`command === "serve" && !isPreview`) uses `public` as its root with nested public-directory copying disabled. `/`, `/help.html`, and `/demos/*.html` are the source demo pages.
+- Only in that development mode, `/accessibility-tool.min.js` resolves to `src/index.ts`, and response-time HTML transformation promotes existing local defer scripts to modules so demo JavaScript and tool source participate in Vite's module graph and update handling. Source HTML files are never rewritten.
+- Vite build keeps the project root, library formats, filenames, declaration generation, external stylesheet emission, and `public` copying unchanged. Vite preview remains a `dist` production preview and must never receive the development root, alias, or HTML transformation.
+
 Internal visual ownership keeps reading, blind-path context, and current focus
 independent:
 

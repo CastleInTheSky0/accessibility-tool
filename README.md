@@ -121,6 +121,10 @@ pnpm test:e2e
 pnpm build
 ```
 
+`pnpm dev` 直接以 `public` 作为开发站点根目录，访问 `http://127.0.0.1:5173/` 即可打开完整演示，无需预先构建。开发响应会在内存中把 `/accessibility-tool.min.js` 接到 `src/index.ts`，并将演示页已有的本地 defer 脚本纳入 Vite 模块图；修改 `public` 下的 HTML、CSS、JavaScript 或 `src` 下的 TypeScript 会自动热更新或整页刷新，不会回写演示 HTML。
+
+`pnpm preview` 仍从 `dist` 预览生产构建，使用实际的 `accessibility-tool.min.js`、`accessibility-tool.es.js` 与外部 CSS 产物。
+
 默认端到端回归使用系统 Chrome 与 Edge。在已安装 Playwright Firefox/WebKit 浏览器包的 CI 中，可设置 `PLAYWRIGHT_ALL_BROWSERS=1` 追加两组回归。
 
 演示入口：

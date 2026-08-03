@@ -1,0 +1,3 @@
+{"file":".trellis/spec/frontend/accessibility-tool-contract.md","reason":"Preserve the library build, preview output, demo behavior, and release validation contract while changing dev serving."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Apply project frontend quality, verification, and minimal-change requirements."}
+{"file":".trellis/tasks/08-03-public-dev-hmr/research/vite-public-dev-root.md","reason":"Defines the selected Vite dev-root, alias, HTML transform, HMR, and preview-isolation approach."}
