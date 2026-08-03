@@ -12,7 +12,8 @@ describe("RegionNavigationController", () => {
     const last = get("service-b");
     const regions = [region(first), region(last)];
     const effects = createEffects();
-    const controller = createController(effects);
+    const announce = vi.fn();
+    const controller = createController(effects, announce);
     controller.start();
     controller.update(regions, [document], "initial");
     expect(first.getAttribute("tabindex")).toBe("0");
@@ -20,6 +21,7 @@ describe("RegionNavigationController", () => {
     controller.navigate("service");
     controller.navigate("service");
     expect(document.activeElement).toBe(last);
+    announce.mockClear();
 
     last.remove();
     controller.update([regions[0] as ScannedRegion], [document], "mutation");
@@ -28,6 +30,7 @@ describe("RegionNavigationController", () => {
     expect(effects.setRegionHighlight).toHaveBeenLastCalledWith(first);
     expect(first.getAttribute("tabindex")).toBe("0");
     expect(last.hasAttribute("tabindex")).toBe(false);
+    expect(announce).not.toHaveBeenCalled();
     controller.stop();
     expect(first.hasAttribute("tabindex")).toBe(false);
   });
@@ -130,13 +133,15 @@ describe("RegionNavigationController", () => {
     `;
     const activeRegion = get("service-a");
     const effects = createEffects();
-    const controller = createController(effects);
+    const announce = vi.fn();
+    const controller = createController(effects, announce);
     controller.start();
     controller.update([region(activeRegion)], [document], "initial");
     effects.setRegionHighlight.mockClear();
 
     activeRegion.focus();
     expect(effects.setRegionHighlight).toHaveBeenLastCalledWith(activeRegion);
+    expect(announce).not.toHaveBeenCalled();
 
     effects.clearRegionHighlight.mockClear();
     get("inside").focus();
@@ -148,6 +153,86 @@ describe("RegionNavigationController", () => {
 
     controller.stop();
     expect(activeRegion.hasAttribute("tabindex")).toBe(false);
+  });
+
+  it("announces the short name, supplemented category, instruction and ordinal", () => {
+    document.body.innerHTML = `
+      <section id="headline-a"></section>
+      <section id="headline-b"></section>
+    `;
+    const announce = vi.fn();
+    const onRegionChange = vi.fn();
+    const controller = createController(
+      createEffects(),
+      announce,
+      onRegionChange,
+    );
+    controller.start();
+    controller.update(
+      [
+        region(get("headline-a"), "viewport", "要闻"),
+        region(get("headline-b"), "viewport", "专题"),
+      ],
+      [document],
+      "initial",
+    );
+
+    controller.navigate("viewport");
+
+    expect(announce).toHaveBeenCalledWith(
+      "提示：您已进入要闻视窗区，按下 Tab 键浏览信息；第 1 个，共 2 个",
+    );
+    expect(onRegionChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ label: "要闻" }),
+    );
+
+    controller.navigate("viewport");
+    expect(announce).toHaveBeenNthCalledWith(
+      2,
+      "提示：您已进入专题视窗区，按下 Tab 键浏览信息；第 2 个，共 2 个",
+    );
+    expect(onRegionChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ label: "专题" }),
+    );
+    controller.stop();
+  });
+
+  it("literally concatenates the resolved label and category label", () => {
+    document.body.innerHTML = `
+      <nav id="main-navigation"></nav>
+      <main id="main-content"></main>
+      <section id="spaced-headline"></section>
+    `;
+    const announce = vi.fn();
+    const controller = createController(createEffects(), announce);
+    controller.start();
+    controller.update(
+      [
+        region(get("main-navigation"), "navigation", "主导航"),
+        region(get("main-content"), "content", "正文区"),
+        region(get("spaced-headline"), "viewport", " 要闻 "),
+      ],
+      [document],
+      "initial",
+    );
+
+    controller.navigate("navigation");
+    controller.navigate("content");
+    controller.navigate("viewport");
+
+    expect(announce).toHaveBeenNthCalledWith(
+      1,
+      "提示：您已进入主导航导航区，按下 Tab 键浏览信息；第 1 个，共 1 个",
+    );
+    expect(announce).toHaveBeenNthCalledWith(
+      2,
+      "提示：您已进入正文区正文区，按下 Tab 键浏览信息；第 1 个，共 1 个",
+    );
+    expect(announce).toHaveBeenNthCalledWith(
+      3,
+      "提示：您已进入 要闻 视窗区，按下 Tab 键浏览信息；第 1 个，共 1 个",
+    );
+    controller.stop();
   });
 
   it("restores exact tabindex values when regions become hidden or removed", () => {
@@ -230,14 +315,16 @@ describe("RegionNavigationController", () => {
 
 function createController(
   effects = createEffects(),
+  onAnnounce = vi.fn(),
+  onRegionChange = vi.fn(),
 ): RegionNavigationController {
   return new RegionNavigationController(
     effects,
     {
       getToolbarOffset: () => 102,
       onCountsChange: vi.fn(),
-      onAnnounce: vi.fn(),
-      onRegionChange: vi.fn(),
+      onAnnounce,
+      onRegionChange,
       onReturnToCategory: vi.fn(),
       onDynamicUpdate: vi.fn(),
     },
@@ -251,11 +338,15 @@ function createEffects() {
   };
 }
 
-function region(element: HTMLElement): ScannedRegion {
+function region(
+  element: HTMLElement,
+  type: ScannedRegion["type"] = "service",
+  label = element.id,
+): ScannedRegion {
   return {
-    type: "service",
+    type,
     element,
-    label: element.id,
+    label,
     source: "data",
   };
 }

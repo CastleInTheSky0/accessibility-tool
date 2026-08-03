@@ -12,6 +12,7 @@ When the accessibility tool is open, make focus and blind-path context easy to l
 - The project already isolates toolbar styles in a Shadow Root and must clean up page-side effects on close or destroy.
 - The toolbar already has its own orange focus treatment.
 - Reading retains the existing `.a11y-highlight` overlay; focus and blind-path context need independent node-owned outline state so speech cleanup cannot clear them.
+- Blind-path shortcut navigation currently announces the resolved region label, category, and ordinal count, but the product now requires a complete entry instruction such as “提示：您已进入要闻视窗区，按下 Tab 键浏览信息”。
 
 ## Confirmed Product Decisions
 
@@ -39,6 +40,10 @@ When the accessibility tool is open, make focus and blind-path context easy to l
 - Current page focus uses yellow `#ffb800`; the active blind-path region uses deep orange `#ff6c00`.
 - When the region container itself first receives focus, show only the yellow focus outline; after Tab enters a descendant, show the deep-orange outline on the region and the yellow outline on the descendant.
 - The blue-and-orange double frame currently seen on the demo is the host page's native blue `:focus-visible` outline plus the old product overlay. Direct reversible ownership of the node outline must leave only the yellow current-focus color visible.
+- `data-a11y-label` and legacy `aria-readlabel` continue to carry only the integration-provided region name, such as `要闻`; they do not need to repeat the category or the complete instructional sentence.
+- Shortcut/category navigation supplements the category from the recognized region type and announces a complete instruction, for example `要闻` + `viewport` becomes “提示：您已进入要闻视窗区，按下 Tab 键浏览信息”。 Existing ordinal information for multiple matching regions remains available after the instruction.
+- Category supplementation is a literal concatenation of the resolved label and `REGION_LABELS[type]`; it does not trim the label or attempt semantic de-duplication. For example, `主导航` + `导航区` becomes `主导航导航区`.
+- Ordinary focus activation and automatic recovery after a region mutation do not repeat the shortcut/category entry announcement.
 
 ## Requirements (evolving)
 
@@ -64,6 +69,7 @@ When the accessibility tool is open, make focus and blind-path context easy to l
 - Do not directly toggle the host panel's `data-a11y-hidden` or visual styles from the tabs controller.
 - With no valid saved open intent, importing the script must remain lazy and must not render, scan, or bind high-frequency listeners.
 - Automatic restoration applies only to same-origin pages that load the same script; do not add cross-origin, cross-tab synchronization, or script injection.
+- Shortcut/category navigation must combine the short integration name with the recognized category and announce a complete region-entry description rather than only the short name/category and count.
 
 ## Acceptance Criteria (evolving)
 
@@ -96,6 +102,8 @@ When the accessibility tool is open, make focus and blind-path context easy to l
 - [x] Successful explicit open persists a separate versioned marker; reset preserves it, while close/exit/destroy remove it.
 - [x] Reload and same-origin navigation restore the full runtime using final site configuration without focus theft or a repeated open announcement.
 - [x] Invalid/blocked storage, disabled persistence, key changes, failed opens, and pending restore races are covered without leaving stale true markers.
+- [x] With `data-a11y-label="要闻"` on a `viewport` region, shortcut/category navigation speaks “提示：您已进入要闻视窗区，按下 Tab 键浏览信息” before any ordinal detail.
+- [x] Category supplementation always uses literal `label + category` concatenation, including outputs such as “主导航导航区” when the label itself already contains “导航”.
 
 ## Definition of Done
 
@@ -123,6 +131,7 @@ When the accessibility tool is open, make focus and blind-path context easy to l
 - Future configurability of focus color/thickness is intentionally deferred; this version uses the verified yellow/deep-orange pair.
 - Open-state persistence is owned by a dedicated store using `${storageKey}:open-state`; it is intentionally separate from `PersistedPreferences`.
 - The automatic path waits for actual `DOMContentLoaded` rather than treating `readyState="interactive"` as final, because deferred site configuration scripts still run during that state.
+- Region entry speech is formatted by the navigation layer using literal scanner-resolved short label plus `REGION_LABELS[type]`; scanning/source priority remains unchanged and no category de-duplication is applied.
 
 ## Decision (ADR-lite, provisional)
 

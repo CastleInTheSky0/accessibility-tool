@@ -142,7 +142,7 @@ export class RegionNavigationController {
     if (!region) {
       return false;
     }
-    this.focusRegion(region, nextIndex, regions.length);
+    this.focusRegion(region, nextIndex, regions.length, true);
     return true;
   }
 
@@ -170,6 +170,7 @@ export class RegionNavigationController {
     region: ScannedRegion,
     index: number,
     count: number,
+    announceEntry: boolean,
   ): void {
     const element = region.element;
     const frame = element.ownerDocument.defaultView?.frameElement;
@@ -196,8 +197,11 @@ export class RegionNavigationController {
       behavior: this.getScrollBehavior(element),
     });
 
-    const message = `${region.label}，${REGION_LABELS[region.type]}，第 ${index + 1} 个，共 ${count} 个`;
-    this.callbacks.onAnnounce(message);
+    if (announceEntry) {
+      const entryLabel = `${region.label}${REGION_LABELS[region.type]}`;
+      const message = `提示：您已进入${entryLabel}，按下 Tab 键浏览信息；第 ${index + 1} 个，共 ${count} 个`;
+      this.callbacks.onAnnounce(message);
+    }
     this.callbacks.onRegionChange({
       type: region.type,
       index,
@@ -223,7 +227,7 @@ export class RegionNavigationController {
     const nextIndex = Math.max(previousIndex, 0) % regions.length;
     const region = regions[nextIndex];
     if (region) {
-      this.focusRegion(region, nextIndex, regions.length);
+      this.focusRegion(region, nextIndex, regions.length, false);
     }
   }
 
