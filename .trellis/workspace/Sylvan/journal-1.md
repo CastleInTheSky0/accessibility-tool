@@ -104,3 +104,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: 将选项面板纳入盲道区域
+
+**Date**: 2026-08-04
+**Task**: 将选项面板纳入盲道区域
+**Branch**: `feat/accessibility-tool-v0.1`
+
+### Summary
+
+将显式分类的选项面板纳入盲道区域；隐藏面板可由区域导航触发宿主事件后聚焦；选项与面板统一使用面板分类朗读，并补充测试与接入文档。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `78bb356` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
