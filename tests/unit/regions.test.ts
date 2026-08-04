@@ -79,6 +79,43 @@ describe("RegionScanner", () => {
     scanner.stop();
   });
 
+  it("does not auto-detect a native main without an explicit region", () => {
+    document.body.innerHTML = `
+      <main id="plain-main"></main>
+      <main id="explicit-main" data-a11y-region="content"></main>
+      <article id="semantic-article"></article>
+      <section id="aria-main" role="main"></section>
+    `;
+
+    let regions: readonly ScannedRegion[] = [];
+    const scanner = new RegionScanner(
+      mergeConfig(DEFAULT_CONFIG, { regions: { observe: false } }),
+      {
+        onUpdate: (next) => {
+          regions = next;
+        },
+        onRouteChange: vi.fn(),
+        onError: vi.fn(),
+      },
+    );
+    scanner.start();
+
+    expect(find(regions, "plain-main")).toBeUndefined();
+    expect(find(regions, "explicit-main")).toMatchObject({
+      type: "content",
+      source: "data",
+    });
+    expect(find(regions, "semantic-article")).toMatchObject({
+      type: "content",
+      source: "semantic",
+    });
+    expect(find(regions, "aria-main")).toMatchObject({
+      type: "content",
+      source: "semantic",
+    });
+    scanner.stop();
+  });
+
   it("retains explicitly marked hidden tab panels and resolves their tab names", () => {
     document.body.innerHTML = `
       <style>[role="tabpanel"][data-a11y-hidden] { display: none; }</style>

@@ -48,6 +48,10 @@ const READABLE_SELECTOR = [
   "[role~='radio']",
   "[role~='combobox']",
   "[role~='listbox']",
+  "[role~='textbox']",
+  "[role~='searchbox']",
+  "[role~='spinbutton']",
+  "[contenteditable]:not([contenteditable='false'])",
 ].join(",");
 
 export function isEditableTarget(target: EventTarget | null): boolean {
@@ -240,7 +244,16 @@ function getFormText(element: HTMLElement): string {
     return normalizeText(`${labelText} ${value}`);
   }
 
-  if (getElementSpeechKind(element) !== "select") {
+  const speechKind = getElementSpeechKind(element);
+  if (speechKind === "textbox") {
+    return normalizeText(
+      element.getAttribute("aria-placeholder") ||
+        element.getAttribute("placeholder") ||
+        "",
+    );
+  }
+
+  if (speechKind !== "select") {
     return "";
   }
 
@@ -282,6 +295,8 @@ function formatElementSpeech(element: HTMLElement, name: string): string {
       return withSemanticPrefix("单选框", name);
     case "select":
       return withSemanticPrefix("下拉框", name);
+    case "textbox":
+      return name ? `输入框：${name}` : "输入框";
     case "text":
       return name ? `文本：${name}` : "";
   }
@@ -289,7 +304,15 @@ function formatElementSpeech(element: HTMLElement, name: string): string {
 
 function getElementSpeechKind(
   element: HTMLElement,
-): "link" | "image" | "button" | "checkbox" | "radio" | "select" | "text" {
+):
+  | "link"
+  | "image"
+  | "button"
+  | "checkbox"
+  | "radio"
+  | "select"
+  | "textbox"
+  | "text" {
   const role = element
     .getAttribute("role")
     ?.trim()
@@ -305,6 +328,10 @@ function getElementSpeechKind(
     case "combobox":
     case "listbox":
       return "select";
+    case "textbox":
+    case "searchbox":
+    case "spinbutton":
+      return "textbox";
   }
 
   const inputType = element.getAttribute("type")?.toLowerCase();
@@ -323,6 +350,13 @@ function getElementSpeechKind(
       ["button", "submit", "reset", "image"].includes(inputType ?? ""))
   ) {
     return "button";
+  }
+  if (
+    (element.tagName === "INPUT" && inputType !== "hidden") ||
+    element.tagName === "TEXTAREA" ||
+    element.isContentEditable
+  ) {
+    return "textbox";
   }
   if (
     (element.tagName === "A" || element.tagName === "AREA") &&

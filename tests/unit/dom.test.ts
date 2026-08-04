@@ -21,7 +21,7 @@ describe("DOM accessibility helpers", () => {
 
     expect(getAccessibleText(get("target"))).toBe("按钮，工具名称");
     expect(getAccessibleText(get("by"))).toBe("按钮，关联标题");
-    expect(getAccessibleText(get("field"))).toBe("文本：姓名 张三");
+    expect(getAccessibleText(get("field"))).toBe("输入框：姓名 张三");
     expect(getAccessibleText(get("pressed"))).toBe("按钮，声音，已按下");
     expect(getAccessibleText(get("checked"))).toBe(
       "复选框，接收通知，已选中",
@@ -63,7 +63,7 @@ describe("DOM accessibility helpers", () => {
     expect(getAccessibleText(get("title-image"))).toBe("图片，标题描述");
     expect(getAccessibleText(get("alt-image"))).toBe("图片，替代描述");
     expect(getAccessibleText(get("fallback-field"))).toBe(
-      "文本：姓名 张三",
+      "输入框：姓名 张三",
     );
     expect(getAccessibleText(get("visible"))).toBe("文本：可见内容");
   });
@@ -96,6 +96,11 @@ describe("DOM accessibility helpers", () => {
         <div role="option" aria-selected="false">成都</div>
         <div role="option" aria-selected="true">重庆</div>
       </div>
+      <input id="placeholder-input" placeholder="请输入关键词">
+      <textarea id="textarea" placeholder="请输入备注"></textarea>
+      <div id="aria-textbox" role="textbox" aria-label="搜索内容"></div>
+      <div id="aria-placeholder-textbox" role="textbox" aria-placeholder="请输入账号"></div>
+      <div id="editable" contenteditable="true">可编辑内容</div>
     `;
 
     expect(getAccessibleText(get("new-window"))).toBe(
@@ -139,9 +144,18 @@ describe("DOM accessibility helpers", () => {
     expect(getAccessibleText(get("listbox"))).toBe("下拉框，候选城市");
     expect(getAccessibleText(get("active-combobox"))).toBe("下拉框，杭州");
     expect(getAccessibleText(get("selected-listbox"))).toBe("下拉框，重庆");
+    expect(getAccessibleText(get("placeholder-input"))).toBe(
+      "输入框：请输入关键词",
+    );
+    expect(getAccessibleText(get("textarea"))).toBe("输入框：请输入备注");
+    expect(getAccessibleText(get("aria-textbox"))).toBe("输入框：搜索内容");
+    expect(getAccessibleText(get("aria-placeholder-textbox"))).toBe(
+      "输入框：请输入账号",
+    );
+    expect(getAccessibleText(get("editable"))).toBe("输入框：可编辑内容");
   });
 
-  it("uses the text prefix for every other readable element", () => {
+  it("uses the text prefix for other readable elements", () => {
     document.body.innerHTML = `
       <h2 id="heading">设置</h2>
       <p id="paragraph" aria-expanded="true">详细内容</p>
@@ -158,7 +172,7 @@ describe("DOM accessibility helpers", () => {
     expect(getAccessibleText(get("paragraph"))).toBe(
       "文本：详细内容，已展开",
     );
-    expect(getAccessibleText(get("text-input"))).toBe("文本：关键词");
+    expect(getAccessibleText(get("text-input"))).toBe("输入框：关键词");
     expect(getAccessibleText(get("switch"))).toBe(
       "文本：夜间模式，已选中",
     );

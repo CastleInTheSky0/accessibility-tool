@@ -59,7 +59,7 @@ openButtons.forEach((button) => {
 <main data-a11y-region="content" data-a11y-label="正文"></main>
 ```
 
-未显式标记时，默认仅保守识别有明确语义的 `nav`、`form`、`main`、`article` 等结构。可以使用 `regions.autoDetect: false` 关闭。
+未显式标记时，默认仅保守识别有明确语义的 `nav`、`form`、`article` 及相关 ARIA role。原生 `main` 不再自动归为正文区，需要像上例一样显式标记；可以使用 `regions.autoDetect: false` 关闭全部语义自动识别。
 
 ## 5. 销毁
 

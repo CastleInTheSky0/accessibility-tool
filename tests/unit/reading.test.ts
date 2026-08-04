@@ -8,6 +8,43 @@ import type { SpeechController } from "../../src/features/speech";
 import { TabsController } from "../../src/features/tabs";
 
 describe("ReadingController region focus coordination", () => {
+  it("speaks input fields with the input semantic prefix", () => {
+    document.body.innerHTML = `
+      <input id="search-field" placeholder="请输入关键词">
+    `;
+    const speak = vi.fn();
+    const speech = {
+      speak,
+      cancel: vi.fn(),
+    } as unknown as SpeechController;
+    const effects = {
+      setHighlight: vi.fn(),
+      clearHighlight: vi.fn(),
+    };
+    const reading = new ReadingController(
+      DEFAULT_CONFIG,
+      speech,
+      effects as unknown as PageEffectsController,
+      { isEnabled: () => true, getRate: () => 1 },
+      {
+        isRegionContainer: () => false,
+        isTabSpeechTarget: () => false,
+      },
+    );
+    reading.setRoots([document]);
+    reading.start();
+
+    get("search-field").focus();
+
+    expect(speak).toHaveBeenCalledWith(
+      "输入框：请输入关键词",
+      "zh-CN",
+      1,
+      expect.any(Object),
+    );
+    reading.stop();
+  });
+
   it.each(["reading-first", "region-first"] as const)(
     "keeps one region announcement when listeners register %s",
     (listenerOrder) => {

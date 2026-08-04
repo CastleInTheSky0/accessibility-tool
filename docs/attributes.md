@@ -65,7 +65,8 @@
 
 - `nav`、`role="navigation"` → 导航区
 - `form`、`role="form"`、`role="search"` → 交互区
-- `main`、`article`、`role="main"`、`role="article"` → 正文区
+- `article`、`role="main"`、`role="article"` → 正文区
+- 原生 `main` 不自动识别；需要通过 `data-a11y-region`、旧站兼容属性或接入配置显式声明
 - 有明确名称的 `role="list"` → 列表区
 - 普通 `ul` / `ol` 不自动识别
 - 视窗区和服务区不自动推测

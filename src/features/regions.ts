@@ -48,7 +48,7 @@ const SEMANTIC_SELECTORS: Readonly<Record<RegionType, string>> = {
     '[role="list"][data-a11y-label]',
     '[role="list"][aria-readlabel]',
   ].join(","),
-  content: 'main, article, [role="main"], [role="article"]',
+  content: 'article, [role="main"], [role="article"]',
 };
 
 export class RegionScanner {

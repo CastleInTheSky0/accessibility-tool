@@ -153,6 +153,7 @@ AccessibilityTool.off(eventName, listener);
   - 标签页进入后台时停止朗读。
 - 调整语速时取消当前语音，并使用新速度朗读“当前语速 X 倍”的确认提示；后续内容继续使用新速度。
 - 朗读文本只取最小语义单元，例如标题、段落、列表项、链接、按钮或表单控件，不一次朗读整个大型容器。
+- 原生输入框、文本域、`role="textbox"` / `role="searchbox"` / `role="spinbutton"` 及可编辑输入区域使用 `输入框：{名称、当前值或占位提示}`；链接、图片、按钮、复选框、单选框和下拉框继续使用各自语义前缀，其它内容使用 `文本：{内容}`。
 - 文本提取优先级：
   1. `data-a11y-label`；
   2. 兼容属性 `aria-readlabel`；
@@ -308,7 +309,7 @@ PC 首版点击“配色”按固定顺序循环：
 - 默认保守映射：
   - `nav`、`role="navigation"` → 导航区；
   - `form`、`role="form"`、`role="search"` → 交互区；
-  - `main`、`article`、`role="main"`、`role="article"` → 正文区；
+  - `article`、`role="main"`、`role="article"` → 正文区；原生 `main` 不自动识别，需显式声明；
   - 有明确名称且显式设置 `role="list"` → 列表区；
   - 普通 `ul/ol` 不自动识别；
   - 视窗区和服务区不自动推测。
