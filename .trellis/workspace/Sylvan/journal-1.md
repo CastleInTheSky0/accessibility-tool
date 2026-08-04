@@ -71,3 +71,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: 记录云端 TTS 后续开发方案
+
+**Date**: 2026-08-04
+**Task**: 记录云端 TTS 后续开发方案
+**Branch**: `feat/accessibility-tool-v0.1`
+
+### Summary
+
+新增云端 TTS living document 与 README 入口，记录混合朗读、自有网关、单厂商首发、本地降级、接口草案、安全治理、成本快照和分阶段路线。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `34c06fc` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
