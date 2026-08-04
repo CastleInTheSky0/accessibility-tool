@@ -678,32 +678,103 @@ test("keeps overlay fixed without reserving page space", async ({ page }) => {
   await expectToolbarFixedThroughScroll(page);
 });
 
-test("pins, collapses and expands with Alt+Shift+A", async ({ page }) => {
+test("pins, animates collapse visibility and preserves expand triggers", async ({
+  page,
+}) => {
   await page.evaluate(() => {
     window.AccessibilityTool.configure({
-      toolbar: { pinHideDelayMs: 60 },
+      toolbar: { pinHideDelayMs: 5000 },
     });
   });
   const originalPadding = await getBodyPaddingTop(page);
   await page.getByRole("button", { name: "打开无障碍工具" }).click();
   const host = page.locator("[data-a11y-tool-host]");
+  const toolbar = host.locator(".a11y-toolbar");
   const expandedHeight = await getHostHeight(page);
   const pin = host.locator('[data-action="pin"]');
   await expect(pin).toHaveAttribute("data-icon-state", "pin-off");
+  await page.mouse.move(500, 70);
+  await page.mouse.move(500, 400);
+  await expect(host).not.toHaveAttribute("data-a11y-tool-collapsed", "");
+  await expect.poll(() => getBodyPaddingTop(page)).toBeCloseTo(
+    originalPadding + expandedHeight,
+    1,
+  );
+
   await pin.click();
   await expect(pin).toHaveAttribute("data-icon-state", "pin-on");
+  await expect(pin).toBeFocused();
   await expect.poll(() => getBodyPaddingTop(page)).toBeCloseTo(
     originalPadding,
     1,
   );
-  await page.getByRole("searchbox", { name: "示例检索" }).focus();
+  const scrollBeforeCollapse = await page.evaluate(() => {
+    document.documentElement.style.scrollBehavior = "auto";
+    const target = Math.min(
+      900,
+      document.documentElement.scrollHeight - window.innerHeight,
+    );
+    window.scrollTo(0, target);
+    return window.scrollY;
+  });
+  expect(scrollBeforeCollapse).toBeGreaterThan(0);
+  await armToolbarMotionCapture(host, "collapse");
   await page.mouse.move(500, 400);
   await expect(host).toHaveAttribute("data-a11y-tool-collapsed", "", {
-    timeout: 1500,
+    timeout: 1000,
   });
+  const collapseMotion = await waitForToolbarMotionCapture(host);
+  expect(collapseMotion.start).toMatchObject({
+    delay: "0s, 0.18s",
+    duration: "0.18s, 0s",
+    pointerEvents: "none",
+    property: "transform, visibility",
+    visibility: "visible",
+  });
+  expect(collapseMotion.end).toMatchObject({
+    pointerEvents: "none",
+    visibility: "hidden",
+  });
+  expect(collapseMotion.elapsedTime).toBeCloseTo(0.18, 5);
+  expect(collapseMotion.end.translateY).toBeCloseTo(-expandedHeight, 0);
+  const reveal = host.getByRole("button", { name: "展开无障碍工具栏" });
+  await expect(reveal).toBeFocused();
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(
+    scrollBeforeCollapse,
+  );
   await expect.poll(() => getHostHeight(page)).toBe(12);
   await expect.poll(() => getHostTop(page)).toBe(0);
 
+  await armToolbarMotionCapture(host, "expand");
+  await page.keyboard.press("Enter");
+  await expect(host).not.toHaveAttribute("data-a11y-tool-collapsed", "");
+  const expandMotion = await waitForToolbarMotionCapture(host);
+  expect(expandMotion.start).toMatchObject({
+    delay: "0s, 0s",
+    duration: "0.18s, 0s",
+    pointerEvents: "auto",
+    property: "transform, visibility",
+    visibility: "visible",
+  });
+  expect(expandMotion.end.visibility).toBe("visible");
+  expect(expandMotion.elapsedTime).toBeCloseTo(0.18, 5);
+  expect(expandMotion.end.translateY).toBeCloseTo(0, 0);
+  await expect(host.locator('[data-action="reading"]')).toBeFocused();
+  await expect.poll(() => getHostHeight(page)).toBeCloseTo(expandedHeight, 1);
+
+  await page.mouse.move(500, 70);
+  await page.mouse.move(500, 400);
+  await expect(host).toHaveAttribute("data-a11y-tool-collapsed", "", {
+    timeout: 500,
+  });
+  await page.mouse.move(500, 1);
+  await expect(host).not.toHaveAttribute("data-a11y-tool-collapsed", "");
+  await expect.poll(() => getHostHeight(page)).toBeCloseTo(expandedHeight, 1);
+
+  await page.mouse.move(500, 400);
+  await expect(host).toHaveAttribute("data-a11y-tool-collapsed", "", {
+    timeout: 500,
+  });
   await page.keyboard.press("Alt+Shift+KeyA");
   await expect(host).not.toHaveAttribute("data-a11y-tool-collapsed", "");
   await expect(host.locator('[data-action="reading"]')).toBeFocused();
@@ -713,6 +784,157 @@ test("pins, collapses and expands with Alt+Shift+A", async ({ page }) => {
     originalPadding,
     1,
   );
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.mouse.move(500, 70);
+  await page.mouse.move(500, 400);
+  await expect(host).toHaveAttribute("data-a11y-tool-collapsed", "", {
+    timeout: 500,
+  });
+  const reducedCollapsed = await getToolbarMotionState(toolbar);
+  expect(reducedCollapsed).toMatchObject({
+    delay: "0s",
+    duration: "0s",
+    pointerEvents: "none",
+    property: "none",
+    visibility: "hidden",
+  });
+  expect(reducedCollapsed.translateY).toBeCloseTo(-expandedHeight, 0);
+
+  await page.mouse.move(500, 1);
+  await expect(host).not.toHaveAttribute("data-a11y-tool-collapsed", "");
+  const reducedExpanded = await getToolbarMotionState(toolbar);
+  expect(reducedExpanded).toMatchObject({
+    delay: "0s",
+    duration: "0s",
+    pointerEvents: "auto",
+    property: "none",
+    visibility: "visible",
+  });
+  expect(reducedExpanded.translateY).toBeCloseTo(0, 0);
+});
+
+test("collapses pinned read-screen mode with the same animation and expand triggers", async ({
+  page,
+}) => {
+  await page.evaluate(() => {
+    window.AccessibilityTool.configure({
+      toolbar: { pinHideDelayMs: 5000 },
+    });
+  });
+  const originalPadding = await getBodyPaddingTop(page);
+  await page.getByRole("button", { name: "打开无障碍工具" }).click();
+  const host = page.locator("[data-a11y-tool-host]");
+  const expandedHeight = await getHostHeight(page);
+  const pin = host.locator('[data-mode="main"] [data-action="pin"]');
+  const mainReadScreen = host.locator(
+    '[data-mode="main"] [data-action="readScreen"]',
+  );
+
+  await pin.click();
+  await mainReadScreen.click();
+  const screenGroup = host.locator('[data-mode="screen"]');
+  const regionControls = screenGroup.locator("[data-region-control]");
+  await expect(screenGroup).toBeVisible();
+  await expect(host).not.toHaveAttribute("data-a11y-tool-collapsed", "");
+  await expect(regionControls).toHaveCount(6);
+  await expect(
+    screenGroup.locator('[data-action="region:viewport"]'),
+  ).toHaveAttribute("aria-label", /视窗区/);
+  await expect.poll(() => getHostHeight(page)).toBeCloseTo(expandedHeight, 1);
+  await expect.poll(() => getBodyPaddingTop(page)).toBeCloseTo(
+    originalPadding,
+    1,
+  );
+  await expect
+    .poll(() => page.evaluate(() => window.AccessibilityTool.getState()))
+    .toMatchObject({
+      isCollapsed: false,
+      isPinned: true,
+      isReadScreen: true,
+    });
+
+  await armToolbarMotionCapture(host, "collapse");
+  await page.mouse.move(500, 70);
+  await page.mouse.move(500, 400);
+  await expect(host).toHaveAttribute("data-a11y-tool-collapsed", "", {
+    timeout: 1000,
+  });
+  const collapseMotion = await waitForToolbarMotionCapture(host);
+  expect(collapseMotion.start).toMatchObject({
+    delay: "0s, 0.18s",
+    pointerEvents: "none",
+    visibility: "visible",
+  });
+  expect(collapseMotion.end.visibility).toBe("hidden");
+  expect(collapseMotion.elapsedTime).toBeCloseTo(0.18, 5);
+  expect(collapseMotion.end.translateY).toBeCloseTo(-expandedHeight, 0);
+  const reveal = host.getByRole("button", { name: "展开无障碍工具栏" });
+  await expect(reveal).toBeFocused();
+  await expect.poll(() => getHostHeight(page)).toBe(12);
+  await expect.poll(() => getBodyPaddingTop(page)).toBeCloseTo(
+    originalPadding,
+    1,
+  );
+
+  await page.keyboard.press("Enter");
+  await expect(host).not.toHaveAttribute("data-a11y-tool-collapsed", "");
+  await expect(screenGroup).toBeVisible();
+  await expect
+    .poll(() => getHostHeight(page))
+    .toBeCloseTo(expandedHeight, 1);
+  await expect(
+    screenGroup.locator("[data-toolbar-item]:focus"),
+  ).toHaveCount(1);
+
+  await page.mouse.move(500, 70);
+  await page.mouse.move(500, 400);
+  await expect(host).toHaveAttribute("data-a11y-tool-collapsed", "", {
+    timeout: 500,
+  });
+  await page.mouse.move(500, 1);
+  await expect(host).not.toHaveAttribute("data-a11y-tool-collapsed", "");
+  await expect(screenGroup).toBeVisible();
+
+  await page.mouse.move(500, 400);
+  await expect(host).toHaveAttribute("data-a11y-tool-collapsed", "", {
+    timeout: 500,
+  });
+  await page.keyboard.press("Alt+Shift+KeyA");
+  await expect(host).not.toHaveAttribute("data-a11y-tool-collapsed", "");
+  await expect(screenGroup).toBeVisible();
+  await expect(
+    screenGroup.locator("[data-toolbar-item]:focus"),
+  ).toHaveCount(1);
+});
+
+test("keeps keyboard focusout on the configured pinned collapse delay", async ({
+  page,
+}) => {
+  await page.evaluate(() => {
+    window.AccessibilityTool.configure({
+      toolbar: { pinHideDelayMs: 400 },
+    });
+  });
+  await page.mouse.move(500, 400);
+  await page.getByRole("button", { name: "打开无障碍工具" }).focus();
+  await page.keyboard.press("Enter");
+  const host = page.locator("[data-a11y-tool-host]");
+  const pin = host.locator('[data-action="pin"]');
+  for (let index = 0; index < 8; index += 1) {
+    await page.keyboard.press("ArrowRight");
+  }
+  await expect(pin).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(pin).toHaveAttribute("aria-pressed", "true");
+  await armCollapsedMutationTiming(host);
+  await page.keyboard.press("Tab");
+  await expect(pin).not.toBeFocused();
+
+  await expect(host).toHaveAttribute("data-a11y-tool-collapsed", "", {
+    timeout: 2000,
+  });
+  expect(await getCollapsedMutationDelay(host)).toBeGreaterThanOrEqual(300);
 });
 
 test("cycles zoom without scaling the toolbar", async ({ page }) => {
@@ -872,5 +1094,206 @@ async function getControlLocalTrackScale(control: Locator): Promise<number> {
   return control.evaluate((element) => {
     const transform = getComputedStyle(element, "::before").transform;
     return transform === "none" ? 0 : new DOMMatrixReadOnly(transform).a;
+  });
+}
+
+type ToolbarMotionPhase = "collapse" | "expand";
+
+interface ToolbarMotionState {
+  delay: string;
+  duration: string;
+  pointerEvents: string;
+  property: string;
+  translateY: number;
+  visibility: string;
+}
+
+interface ToolbarMotionCapture {
+  elapsedTime: number;
+  end: ToolbarMotionState;
+  start: ToolbarMotionState;
+}
+
+async function armToolbarMotionCapture(
+  host: Locator,
+  phase: ToolbarMotionPhase,
+): Promise<void> {
+  await host.evaluate((element, expectedPhase) => {
+    type CaptureHost = HTMLElement & {
+      __a11yToolbarMotionCapture?: {
+        cancelled: boolean;
+        complete: boolean;
+        elapsedTime?: number;
+        end?: ToolbarMotionState;
+        phase: ToolbarMotionPhase;
+        start?: ToolbarMotionState;
+      };
+    };
+    const captureHost = element as CaptureHost;
+    const toolbar = captureHost.shadowRoot?.querySelector<HTMLElement>(
+      ".a11y-toolbar",
+    );
+    if (!toolbar) {
+      throw new Error("Toolbar motion target is unavailable.");
+    }
+
+    const motion: NonNullable<CaptureHost["__a11yToolbarMotionCapture"]> = {
+      cancelled: false,
+      complete: false,
+      phase: expectedPhase,
+    };
+    captureHost.__a11yToolbarMotionCapture = motion;
+    const captureState = (): ToolbarMotionState => {
+      const style = getComputedStyle(toolbar);
+      const transform = style.transform;
+      return {
+        delay: style.transitionDelay,
+        duration: style.transitionDuration,
+        pointerEvents: style.pointerEvents,
+        property: style.transitionProperty,
+        translateY:
+          transform === "none" ? 0 : new DOMMatrixReadOnly(transform).m42,
+        visibility: style.visibility,
+      };
+    };
+    const matchesExpectedPhase = (): boolean =>
+      captureHost.hasAttribute("data-a11y-tool-collapsed") ===
+      (expectedPhase === "collapse");
+    const handleRun = (event: TransitionEvent): void => {
+      if (
+        event.target !== toolbar ||
+        event.propertyName !== "transform" ||
+        !matchesExpectedPhase()
+      ) {
+        return;
+      }
+      motion.start ??= captureState();
+    };
+    const handleCancel = (event: TransitionEvent): void => {
+      if (event.target === toolbar && event.propertyName === "transform") {
+        motion.cancelled = true;
+      }
+    };
+    const handleEnd = (event: TransitionEvent): void => {
+      if (
+        event.target !== toolbar ||
+        event.propertyName !== "transform" ||
+        !matchesExpectedPhase()
+      ) {
+        return;
+      }
+      motion.elapsedTime = event.elapsedTime;
+      window.requestAnimationFrame(() => {
+        motion.end = captureState();
+        motion.complete = true;
+        toolbar.removeEventListener("transitionrun", handleRun);
+        toolbar.removeEventListener("transitioncancel", handleCancel);
+        toolbar.removeEventListener("transitionend", handleEnd);
+      });
+    };
+    toolbar.addEventListener("transitionrun", handleRun);
+    toolbar.addEventListener("transitioncancel", handleCancel);
+    toolbar.addEventListener("transitionend", handleEnd);
+  }, phase);
+}
+
+async function waitForToolbarMotionCapture(
+  host: Locator,
+): Promise<ToolbarMotionCapture> {
+  await expect
+    .poll(() =>
+      host.evaluate(
+        (element) =>
+          (
+            element as HTMLElement & {
+              __a11yToolbarMotionCapture?: {
+                cancelled: boolean;
+                complete: boolean;
+              };
+            }
+          ).__a11yToolbarMotionCapture,
+      ),
+    )
+    .toMatchObject({ cancelled: false, complete: true });
+  return host.evaluate((element) => {
+    const capture = (
+      element as HTMLElement & {
+        __a11yToolbarMotionCapture?: Partial<ToolbarMotionCapture>;
+      }
+    ).__a11yToolbarMotionCapture;
+    if (
+      typeof capture?.elapsedTime !== "number" ||
+      !capture.start ||
+      !capture.end
+    ) {
+      throw new Error("Toolbar motion capture did not complete.");
+    }
+    return {
+      elapsedTime: capture.elapsedTime,
+      end: capture.end,
+      start: capture.start,
+    };
+  });
+}
+
+async function armCollapsedMutationTiming(host: Locator): Promise<void> {
+  await host.evaluate((element) => {
+    type TimedHost = HTMLElement & {
+      __a11yCollapsedMutationTiming?: {
+        collapsedAt?: number;
+        startedAt: number;
+      };
+    };
+    const timedHost = element as TimedHost;
+    const timing: NonNullable<TimedHost["__a11yCollapsedMutationTiming"]> = {
+      startedAt: performance.now(),
+    };
+    timedHost.__a11yCollapsedMutationTiming = timing;
+    const observer = new MutationObserver(() => {
+      if (!timedHost.hasAttribute("data-a11y-tool-collapsed")) {
+        return;
+      }
+      timing.collapsedAt = performance.now();
+      observer.disconnect();
+    });
+    observer.observe(timedHost, {
+      attributeFilter: ["data-a11y-tool-collapsed"],
+      attributes: true,
+    });
+  });
+}
+
+async function getCollapsedMutationDelay(host: Locator): Promise<number> {
+  return host.evaluate((element) => {
+    const timing = (
+      element as HTMLElement & {
+        __a11yCollapsedMutationTiming?: {
+          collapsedAt?: number;
+          startedAt: number;
+        };
+      }
+    ).__a11yCollapsedMutationTiming;
+    if (typeof timing?.collapsedAt !== "number") {
+      throw new Error("Collapsed mutation timing was not captured.");
+    }
+    return timing.collapsedAt - timing.startedAt;
+  });
+}
+
+async function getToolbarMotionState(
+  toolbar: Locator,
+): Promise<ToolbarMotionState> {
+  return toolbar.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const transform = style.transform;
+    return {
+      delay: style.transitionDelay,
+      duration: style.transitionDuration,
+      pointerEvents: style.pointerEvents,
+      property: style.transitionProperty,
+      translateY:
+        transform === "none" ? 0 : new DOMMatrixReadOnly(transform).m42,
+      visibility: style.visibility,
+    };
   });
 }

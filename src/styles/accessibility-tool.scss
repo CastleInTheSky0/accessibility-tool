@@ -112,7 +112,10 @@ $overlay-z: 2147483645;
   min-width: 0;
   overflow: hidden;
   padding: 0;
-  transition: transform 180ms ease;
+  transition:
+    transform 180ms ease,
+    visibility 0s linear 0s;
+  visibility: visible;
   width: 100%;
 }
 
@@ -130,6 +133,9 @@ $overlay-z: 2147483645;
 :host([data-a11y-tool-collapsed]) .a11y-toolbar {
   pointer-events: none;
   transform: translateY(calc(-1 * var(--a11y-toolbar-height)));
+  transition:
+    transform 180ms ease,
+    visibility 0s linear 180ms;
   visibility: hidden;
 }
 

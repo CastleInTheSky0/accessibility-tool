@@ -380,9 +380,186 @@ describe("ToolbarUI", () => {
     ui.destroy();
     host.remove();
   });
+
+  it("collapses a pinned toolbar immediately on pointer leave and moves hidden focus to reveal", () => {
+    vi.useFakeTimers();
+    const onCollapsedChange = vi.fn();
+    const { host, shadow, ui } = createToolbar(
+      mergeConfig(DEFAULT_CONFIG, {
+        toolbar: { pinHideDelayMs: 5000 },
+      }),
+      onCollapsedChange,
+    );
+
+    try {
+      ui.updateState({ ...defaultState, isPinned: true });
+      const root = shadow.querySelector<HTMLElement>("[data-a11y-tool-root]");
+      const pin = getControl(shadow, "pin");
+      const reveal = shadow.querySelector<HTMLButtonElement>(".a11y-reveal");
+      expect(root).not.toBeNull();
+      expect(reveal).not.toBeNull();
+      const revealFocus = vi.spyOn(reveal!, "focus");
+
+      pin.focus();
+      expect(shadow.activeElement).toBe(pin);
+      root?.dispatchEvent(new Event("pointerleave"));
+
+      expect(host.hasAttribute("data-a11y-tool-collapsed")).toBe(true);
+      expect(reveal?.tabIndex).toBe(0);
+      expect(shadow.activeElement).toBe(reveal);
+      expect(revealFocus).toHaveBeenCalledWith({ preventScroll: true });
+      expect(onCollapsedChange).toHaveBeenLastCalledWith(true);
+
+      reveal?.click();
+      expect(host.hasAttribute("data-a11y-tool-collapsed")).toBe(false);
+      expect(shadow.activeElement).toBe(getControl(shadow, "reading"));
+      expect(onCollapsedChange).toHaveBeenLastCalledWith(false);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+      ui.destroy();
+      host.remove();
+    }
+  });
+
+  it("uses the same pointer collapse model in pinned read-screen mode", () => {
+    vi.useFakeTimers();
+    const onCollapsedChange = vi.fn();
+    const { host, shadow, ui } = createToolbar(
+      mergeConfig(DEFAULT_CONFIG, {
+        toolbar: { pinHideDelayMs: 5000 },
+      }),
+      onCollapsedChange,
+    );
+
+    try {
+      const root = shadow.querySelector<HTMLElement>("[data-a11y-tool-root]");
+      const reveal = shadow.querySelector<HTMLButtonElement>(".a11y-reveal");
+      expect(root).not.toBeNull();
+      expect(reveal).not.toBeNull();
+
+      ui.updateState({
+        ...defaultState,
+        isPinned: false,
+        isReadScreen: true,
+      });
+      root?.dispatchEvent(new Event("pointerleave"));
+      expect(host.hasAttribute("data-a11y-tool-collapsed")).toBe(false);
+
+      ui.updateState({
+        ...defaultState,
+        isPinned: true,
+        isReadScreen: true,
+      });
+      const screenReadScreen = getControls(shadow, "readScreen")[1];
+      screenReadScreen?.focus();
+      root?.dispatchEvent(new Event("pointerleave"));
+
+      expect(host.hasAttribute("data-a11y-tool-collapsed")).toBe(true);
+      expect(reveal?.tabIndex).toBe(0);
+      expect(shadow.activeElement).toBe(reveal);
+      expect(onCollapsedChange).toHaveBeenLastCalledWith(true);
+
+      reveal?.click();
+      expect(host.hasAttribute("data-a11y-tool-collapsed")).toBe(false);
+      expect(
+        shadow.querySelector<HTMLElement>('[data-mode="screen"]')?.hidden,
+      ).toBe(false);
+      expect(shadow.activeElement).toBe(
+        getControl(shadow, "region:viewport"),
+      );
+      expect(onCollapsedChange).toHaveBeenLastCalledWith(false);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+      ui.destroy();
+      host.remove();
+    }
+  });
+
+  it("keeps keyboard focusout on the configured collapse delay", () => {
+    vi.useFakeTimers();
+    const { host, shadow, ui } = createToolbar(
+      mergeConfig(DEFAULT_CONFIG, {
+        toolbar: { pinHideDelayMs: 5000 },
+      }),
+    );
+    const pageControl = document.createElement("button");
+    document.body.append(pageControl);
+
+    try {
+      ui.updateState({ ...defaultState, isPinned: true });
+      getControl(shadow, "pin").focus();
+      pageControl.focus();
+      vi.advanceTimersByTime(0);
+
+      expect(host.hasAttribute("data-a11y-tool-collapsed")).toBe(false);
+      vi.advanceTimersByTime(4999);
+      expect(host.hasAttribute("data-a11y-tool-collapsed")).toBe(false);
+      vi.advanceTimersByTime(1);
+      expect(host.hasAttribute("data-a11y-tool-collapsed")).toBe(true);
+      expect(document.activeElement).toBe(pageControl);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+      ui.destroy();
+      host.remove();
+      pageControl.remove();
+    }
+  });
+
+  it("keeps a pinned read-screen mode switch expanded before scheduled collapse", () => {
+    vi.useFakeTimers();
+    const { host, ui } = createToolbar(
+      mergeConfig(DEFAULT_CONFIG, {
+        toolbar: { pinHideDelayMs: 800 },
+      }),
+    );
+
+    try {
+      ui.updateState({
+        ...defaultState,
+        isCollapsed: false,
+        isPinned: true,
+        isReadScreen: true,
+      });
+      expect(host.hasAttribute("data-a11y-tool-collapsed")).toBe(false);
+
+      ui.scheduleCollapse();
+      vi.advanceTimersByTime(799);
+      expect(host.hasAttribute("data-a11y-tool-collapsed")).toBe(false);
+      vi.advanceTimersByTime(1);
+      expect(host.hasAttribute("data-a11y-tool-collapsed")).toBe(true);
+
+      ui.updateState({
+        ...defaultState,
+        isCollapsed: false,
+        isPinned: true,
+        isReadScreen: true,
+      });
+      expect(host.hasAttribute("data-a11y-tool-collapsed")).toBe(false);
+
+      ui.updateState({
+        ...defaultState,
+        isPinned: false,
+        isReadScreen: true,
+      });
+      ui.scheduleCollapse();
+      vi.advanceTimersByTime(800);
+      expect(host.hasAttribute("data-a11y-tool-collapsed")).toBe(false);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+      ui.destroy();
+      host.remove();
+    }
+  });
 });
 
-function createToolbar(): {
+function createToolbar(
+  config = mergeConfig(DEFAULT_CONFIG),
+  onCollapsedChange: (collapsed: boolean) => void = vi.fn(),
+): {
   host: HTMLDivElement;
   shadow: ShadowRoot;
   ui: ToolbarUI;
@@ -390,10 +567,10 @@ function createToolbar(): {
   const host = document.createElement("div");
   document.body.append(host);
   const shadow = host.attachShadow({ mode: "open" });
-  const ui = new ToolbarUI(host, shadow, mergeConfig(DEFAULT_CONFIG), {
+  const ui = new ToolbarUI(host, shadow, config, {
     onAction: vi.fn(),
     onRateChange: vi.fn(),
-    onCollapsedChange: vi.fn(),
+    onCollapsedChange,
   });
   return { host, shadow, ui };
 }

@@ -332,7 +332,7 @@ export class ToolbarUI {
     this.rateValue.value = `${formatRate(state.speechRate)}×`;
     this.updateAvailability();
 
-    if (!state.isPinned || state.isReadScreen) {
+    if (!state.isPinned) {
       this.setCollapsed(false);
     }
   }
@@ -442,7 +442,7 @@ export class ToolbarUI {
   }
 
   setCollapsed(collapsed: boolean): void {
-    if (!this.state?.isPinned || this.state.isReadScreen || this.ratePanelOpen) {
+    if (!this.state?.isPinned || this.ratePanelOpen) {
       collapsed = false;
     }
     const current = this.host.hasAttribute("data-a11y-tool-collapsed");
@@ -458,7 +458,6 @@ export class ToolbarUI {
     this.cancelCollapse();
     if (
       !this.state?.isPinned ||
-      this.state.isReadScreen ||
       this.ratePanelOpen ||
       this.root.matches(":hover") ||
       this.root.contains(
@@ -470,6 +469,25 @@ export class ToolbarUI {
     this.collapseTimer = window.setTimeout(() => {
       this.setCollapsed(true);
     }, this.config.toolbar.pinHideDelayMs);
+  }
+
+  private collapseFromPointerLeave(): void {
+    if (!this.state?.isPinned || this.ratePanelOpen) {
+      return;
+    }
+    this.cancelCollapse();
+    const activeElement = (
+      this.root.getRootNode() as Document | ShadowRoot
+    ).activeElement;
+    const moveFocusToReveal =
+      activeElement !== this.revealButton && this.root.contains(activeElement);
+    this.setCollapsed(true);
+    if (
+      moveFocusToReveal &&
+      this.host.hasAttribute("data-a11y-tool-collapsed")
+    ) {
+      this.revealButton.focus({ preventScroll: true });
+    }
   }
 
   cancelCollapse(): void {
@@ -702,10 +720,18 @@ export class ToolbarUI {
       this.cancelCollapse();
       this.setCollapsed(false);
     });
-    this.root.addEventListener("pointerleave", () => this.scheduleCollapse());
-    this.root.addEventListener("focusin", () => {
+    this.root.addEventListener("pointerleave", () =>
+      this.collapseFromPointerLeave(),
+    );
+    this.root.addEventListener("focusin", (event) => {
       this.callbacks.onFocusInside?.();
       this.cancelCollapse();
+      if (
+        event.target === this.revealButton &&
+        this.host.hasAttribute("data-a11y-tool-collapsed")
+      ) {
+        return;
+      }
       this.setCollapsed(false);
     });
     this.root.addEventListener("focusout", () => {

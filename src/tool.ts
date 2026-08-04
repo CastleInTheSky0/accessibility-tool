@@ -252,7 +252,7 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
         false,
       );
     }
-    if (this.state.isPinned && !this.state.isReadScreen) {
+    if (this.state.isPinned) {
       this.ui?.scheduleCollapse();
     }
     return this;
@@ -670,7 +670,7 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
           isCollapsed: false,
         });
         this.announce(`工具栏已${this.state.isPinned ? "固定" : "取消固定"}`);
-        if (this.state.isPinned && !this.state.isReadScreen) {
+        if (this.state.isPinned) {
           this.ui?.scheduleCollapse();
         }
         break;

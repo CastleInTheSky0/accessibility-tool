@@ -57,6 +57,12 @@
 - 十字线必须完全移除 `box-shadow`、描边和外框，只保留纯色实体线；水平线高度和垂直线宽度均由 `2px` 提升为 `3px`。
 - 十字线定位与鼠标跟随逻辑、`pointer-events: none`、`aria-hidden="true"` 以及工具栏状态图标保持不变。
 - 工具栏 Shadow Host 的外部层级提升为常规 `z-index` 最大值 `2147483647`，内部 overlay 层级关系保持合理；常规站点内容不得覆盖工具栏，但原生 top layer（例如 `showModal()` 打开的对话框）不受普通 `z-index` 保证。
+- 固定模式开启后，指针离开工具条实际区域必须立即收起，不再等待 `pinHideDelayMs`；指针移入视口顶部和现有展开触发继续按原行为展开，未固定模式的 pointerleave 不得触发收起。
+- 固定状态下主模式与读屏专用模式使用完全相同的收起规则：切换进入读屏专用模式这一动作本身保持展开，之后 pointerleave 立即收起；reveal、视口顶部移入和 `Alt+Shift+A` 均在原模式内展开。未固定的读屏专用模式不得收起，区域控制、模式高度和页面占位不得回归。
+- 鼠标触发立即收起时，即使焦点仍停留在“固定”或其他工具栏控件上也不得被 activeElement 守卫阻止；收起后必须在不改变页面滚动位置的前提下把该焦点安全转移到可见的展开控件，不能把焦点遗留在 `visibility: hidden` 的控件上。
+- 纯键盘 `focusin` / `focusout` 继续使用现有展开与延迟收起语义，不得被鼠标立即收起路径改成无延迟；固定切换、12px 收起条以及 push/overlay 占位规则保持不变。
+- 收起状态可以立即提交 Host 高度、12px 展开条、`pointer-events` 与焦点转移，但工具栏本体的 `visibility: hidden` 必须延迟到现有约 `180ms` 向上位移动画结束后再生效，不能截断离场动画。
+- 展开时工具栏本体必须立即恢复 `visibility: visible`，再从收起位置按同一约 `180ms` 缓动进入；`prefers-reduced-motion: reduce` 下收起和展开均立即完成，不能保留 visibility 延迟或位移动画。
 - 固定、自动收起、12px 展开条、默认 push 占位、overlay、全屏、语速面板和所有功能业务逻辑保持现有行为。
 - 闭合 Shadow Root、hostile CSS、严格 CSP 和 forced-colors 隔离能力不得退化。
 
@@ -87,6 +93,10 @@
 - [ ] 默认主题下十字线与退出危险色均为 `#ff1f1f`；自定义 `toolbar.theme.danger` 后两者同步使用覆盖值。
 - [ ] 十字线水平、垂直轴的计算尺寸均为 `3px`，`box-shadow: none`，无额外描边/外框，并继续保持 `position: fixed`、`pointer-events: none` 与 `aria-hidden="true"`。
 - [ ] 工具栏 Shadow Host 的计算 `z-index` 为 `2147483647`；hostile CSS 及 Chrome/Edge 验证中常规页面内容无法覆盖工具栏，同时文档明确普通 `z-index` 不保证压过原生 top layer。
+- [ ] 固定模式下 pointerleave 在明显短于配置延迟的时间内立即进入 12px 收起态；焦点若原在工具栏内则以 `preventScroll` 语义转移到可见的展开控件且页面滚动位置不变，按 Enter、现有快捷键或将鼠标移入视口顶部均可重新展开。
+- [ ] 固定的读屏专用模式切换完成后保持展开，随后 pointerleave 使用同一 `180ms` 动画收起并保留六类区域控制、模式状态与等高布局；reveal、顶部移入和快捷键展开后仍停留在读屏专用模式。持久化的固定 + 读屏专用状态静默恢复后也按配置进入可收起状态。
+- [ ] 未固定模式 pointerleave 不收起；纯键盘焦点离开固定工具栏时仍等待 `pinHideDelayMs` 后收起，并且固定前后的 push/overlay 页面占位不发生回归。
+- [ ] 固定工具栏收起后的前约 `180ms` 仍为 `visibility: visible` 并完成向上 transform，动画结束后才变为 hidden；任一展开触发都立即恢复 visible 并缓动回位，减少动态效果模式下 visibility 与 transform 同步无动画切换。
 - [ ] Chrome/Edge E2E、axe、hostile CSS、严格 CSP、forced-colors、单元测试、类型检查、Lint 和构建全部通过。
 
 ## Definition of Done
@@ -110,6 +120,9 @@
 - 将 Shadow Host 外层 `z-index` 更新为 `2147483647`，不改变 Shadow DOM 内工具栏、浮层和视觉辅助元素的相对层级。
 - 继续复用 `PageEffectsController` 的焦点与区域独立账本：区域上下文颜色改为 `#008f5a`，两类账本在拥有节点期间都压制宿主 `box-shadow`，焦点账本覆盖同节点的区域账本，释放时按既有顺序恢复。
 - 更新配置单测、工具栏/隔离 E2E 与运行契约，覆盖默认值、主题覆盖、纯色 `3px` 十字线、Host 计算层级及 Chrome/Edge hostile CSS 回归。
+- 为 `ToolbarUI` 增加仅由 pointerleave 调用的立即收起路径：绕过延迟和工具栏内部 activeElement 拒绝条件，在需要时建立收起态并把焦点转移到 reveal；原 `scheduleCollapse()` 继续专用于打开、固定切换、面板关闭和键盘 focusout 的延迟语义。
+- 移除 `ToolbarUI.updateState()`、`setCollapsed()`、`scheduleCollapse()`、pointerleave 路径及运行时打开/固定动作中把 `isReadScreen` 当作禁止收起条件的守卫；模式切换仍由既有 `isCollapsed: false` 提交保证当次保持展开，语速面板与未固定状态等真实阻止条件保持不变。
+- 工具栏基础态声明 `visibility: visible`，并让 visibility 以零时长、零延迟恢复；collapsed 态继续使用 `180ms` transform，但把零时长 visibility 切换延迟 `180ms`。减少动态效果媒体查询继续以 `transition: none !important` 覆盖两者，使 hidden/visible 同步切换。
 
 ## Decision (ADR-lite)
 
