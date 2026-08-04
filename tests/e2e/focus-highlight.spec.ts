@@ -11,7 +11,7 @@ test.beforeEach(async ({ page }) => {
     fixture.style.cssText =
       "position:fixed;left:160px;top:220px;z-index:1;display:flex;gap:12px";
     fixture.innerHTML = `
-      <button id="focus-first" type="button" style="outline-color:rgb(0 85 204)!important;outline-style:solid!important;outline-width:3px!important;outline-offset:2px!important">焦点目标一</button>
+      <button id="focus-first" type="button" style="outline-color:rgb(0 85 204)!important;outline-style:solid!important;outline-width:3px!important;outline-offset:2px!important;box-shadow:0 0 0 4px rgb(0 85 204)!important">焦点目标一</button>
       <button id="focus-second" type="button">焦点目标二</button>
       <p id="static-paragraph">普通正文</p>
       <span id="custom-aria-button" role="button">自定义按钮</span>
@@ -20,6 +20,14 @@ test.beforeEach(async ({ page }) => {
       <span id="explicit-negative-control" role="button" tabindex="-1">显式跳过</span>
     `;
     document.body.append(fixture);
+    const regionWithHostShadow = document.querySelector("header nav");
+    if (regionWithHostShadow instanceof HTMLElement) {
+      regionWithHostShadow.style.setProperty(
+        "box-shadow",
+        "0 0 0 4px rgb(0 85 204)",
+        "important",
+      );
+    }
   });
   await page.getByRole("button", { name: "打开无障碍工具" }).click();
 });
@@ -269,6 +277,8 @@ test("retains distinct inline outline ownership in forced colors", async ({
   expect(await snapshotOwnedInlineOutline(region)).toEqual({
     color: REGION_COLOR,
     colorPriority: "important",
+    shadow: "none",
+    shadowPriority: "important",
     style: "solid",
     stylePriority: "important",
     width: "2px",
@@ -277,6 +287,8 @@ test("retains distinct inline outline ownership in forced colors", async ({
   expect(await snapshotOwnedInlineOutline(focused)).toEqual({
     color: FOCUS_COLOR,
     colorPriority: "important",
+    shadow: "none",
+    shadowPriority: "important",
     style: "solid",
     stylePriority: "important",
     width: "2px",
@@ -293,10 +305,13 @@ async function expectOwnedOutline(
   await expect(target).toHaveCSS("outline-color", color);
   await expect(target).toHaveCSS("outline-style", "solid");
   await expect(target).toHaveCSS("outline-width", "2px");
+  await expect(target).toHaveCSS("box-shadow", "none");
   await expect
     .poll(() => snapshotOwnedInlineOutline(target))
     .toMatchObject({
       colorPriority: "important",
+      shadow: "none",
+      shadowPriority: "important",
       stylePriority: "important",
       widthPriority: "important",
     });
@@ -305,6 +320,8 @@ async function expectOwnedOutline(
 async function snapshotOwnedInlineOutline(target: Locator): Promise<{
   color: string;
   colorPriority: string;
+  shadow: string;
+  shadowPriority: string;
   style: string;
   stylePriority: string;
   width: string;
@@ -315,6 +332,8 @@ async function snapshotOwnedInlineOutline(target: Locator): Promise<{
     return {
       color: htmlElement.style.getPropertyValue("outline-color"),
       colorPriority: htmlElement.style.getPropertyPriority("outline-color"),
+      shadow: htmlElement.style.getPropertyValue("box-shadow"),
+      shadowPriority: htmlElement.style.getPropertyPriority("box-shadow"),
       style: htmlElement.style.getPropertyValue("outline-style"),
       stylePriority: htmlElement.style.getPropertyPriority("outline-style"),
       width: htmlElement.style.getPropertyValue("outline-width"),
@@ -328,6 +347,8 @@ async function snapshotInlineOutline(target: Locator): Promise<{
   colorPriority: string;
   offset: string;
   offsetPriority: string;
+  shadow: string;
+  shadowPriority: string;
   style: string;
   stylePriority: string;
   width: string;
@@ -340,6 +361,8 @@ async function snapshotInlineOutline(target: Locator): Promise<{
       colorPriority: htmlElement.style.getPropertyPriority("outline-color"),
       offset: htmlElement.style.getPropertyValue("outline-offset"),
       offsetPriority: htmlElement.style.getPropertyPriority("outline-offset"),
+      shadow: htmlElement.style.getPropertyValue("box-shadow"),
+      shadowPriority: htmlElement.style.getPropertyPriority("box-shadow"),
       style: htmlElement.style.getPropertyValue("outline-style"),
       stylePriority: htmlElement.style.getPropertyPriority("outline-style"),
       width: htmlElement.style.getPropertyValue("outline-width"),

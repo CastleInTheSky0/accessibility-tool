@@ -529,6 +529,7 @@ export class PageEffectsController {
     ledger.setStyle(element, "outline-color", color, "important");
     ledger.setStyle(element, "outline-style", "solid", "important");
     ledger.setStyle(element, "outline-width", OWNED_OUTLINE_WIDTH, "important");
+    ledger.setStyle(element, "box-shadow", "none", "important");
   }
 
   private releaseFocusPresentation(): void {

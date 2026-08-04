@@ -24,6 +24,11 @@ describe("PageEffectsController focus highlighting", () => {
     first.style.setProperty("outline-style", "dotted", "important");
     first.style.setProperty("outline-width", "7px", "important");
     first.style.setProperty("outline-offset", "5px", "important");
+    first.style.setProperty(
+      "box-shadow",
+      "0 0 0 4px rgb(0 85 204)",
+      "important",
+    );
     const originalOutline = snapshotOutline(first);
 
     effects.start();
@@ -100,6 +105,11 @@ describe("PageEffectsController focus highlighting", () => {
     region.style.setProperty("outline-color", "purple", "important");
     region.style.setProperty("outline-style", "dotted", "important");
     region.style.setProperty("outline-width", "7px", "important");
+    region.style.setProperty(
+      "box-shadow",
+      "0 0 0 5px rgb(0 85 204)",
+      "important",
+    );
     const originalRegionOutline = snapshotOutline(region);
 
     effects.start();
@@ -293,19 +303,29 @@ function expectOwnedOutline(element: HTMLElement, color: string): void {
   expect(element.style.getPropertyValue("outline-color")).toBe(color);
   expect(element.style.getPropertyValue("outline-style")).toBe("solid");
   expect(element.style.getPropertyValue("outline-width")).toBe("2px");
-  for (const property of ["outline-color", "outline-style", "outline-width"]) {
+  expect(element.style.getPropertyValue("box-shadow")).toBe("none");
+  for (const property of [
+    "outline-color",
+    "outline-style",
+    "outline-width",
+    "box-shadow",
+  ]) {
     expect(element.style.getPropertyPriority(property)).toBe("important");
   }
 }
 
 function snapshotOutline(element: HTMLElement): Record<string, string> {
   return Object.fromEntries(
-    ["outline-color", "outline-style", "outline-width", "outline-offset"].map(
-      (property) => [
-        property,
-        `${element.style.getPropertyValue(property)}|${element.style.getPropertyPriority(property)}`,
-      ],
-    ),
+    [
+      "outline-color",
+      "outline-style",
+      "outline-width",
+      "outline-offset",
+      "box-shadow",
+    ].map((property) => [
+      property,
+      `${element.style.getPropertyValue(property)}|${element.style.getPropertyPriority(property)}`,
+    ]),
   );
 }
 
@@ -315,5 +335,6 @@ function emptyOutline(): Record<string, string> {
     "outline-style": "|",
     "outline-width": "|",
     "outline-offset": "|",
+    "box-shadow": "|",
   };
 }
