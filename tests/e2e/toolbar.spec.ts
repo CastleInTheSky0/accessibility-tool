@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/?debug=1");
@@ -55,24 +55,80 @@ test("opens lazily and supports the toolbar keyboard model", async ({ page }) =>
   );
 });
 
+test("keeps the default push toolbar fixed during real page scrolling", async ({
+  page,
+}) => {
+  const originalPadding = await getBodyPaddingTop(page);
+  await page.getByRole("button", { name: "打开无障碍工具" }).click();
+  const host = page.locator("[data-a11y-tool-host]");
+  const toolbarHeight = await host.evaluate(
+    (element) => element.getBoundingClientRect().height,
+  );
+
+  await expect(host).toHaveCSS("position", "fixed");
+  await expect.poll(() => getHostTop(page)).toBe(0);
+  await expect
+    .poll(() => getBodyPaddingTop(page))
+    .toBeCloseTo(originalPadding + toolbarHeight, 1);
+  await expectToolbarFixedThroughScroll(page);
+
+  await host.locator('[data-mode="main"] [data-action="exit"]').click();
+  await expect.poll(() => getBodyPaddingTop(page)).toBeCloseTo(
+    originalPadding,
+    1,
+  );
+});
+
+test("keeps overlay fixed without reserving page space", async ({ page }) => {
+  await page.evaluate(() => {
+    window.AccessibilityTool.configure({
+      toolbar: { layoutMode: "overlay" },
+    });
+  });
+  const originalPadding = await getBodyPaddingTop(page);
+  await page.getByRole("button", { name: "打开无障碍工具" }).click();
+  const host = page.locator("[data-a11y-tool-host]");
+
+  await expect(host).toHaveCSS("position", "fixed");
+  await expect.poll(() => getBodyPaddingTop(page)).toBeCloseTo(
+    originalPadding,
+    1,
+  );
+  await expectToolbarFixedThroughScroll(page);
+});
+
 test("pins, collapses and expands with Alt+Shift+A", async ({ page }) => {
   await page.evaluate(() => {
     window.AccessibilityTool.configure({
       toolbar: { pinHideDelayMs: 60 },
     });
   });
+  const originalPadding = await getBodyPaddingTop(page);
   await page.getByRole("button", { name: "打开无障碍工具" }).click();
   const host = page.locator("[data-a11y-tool-host]");
+  const expandedHeight = await getHostHeight(page);
   await host.locator('[data-action="pin"]').click();
+  await expect.poll(() => getBodyPaddingTop(page)).toBeCloseTo(
+    originalPadding,
+    1,
+  );
   await page.getByRole("searchbox", { name: "示例检索" }).focus();
   await page.mouse.move(500, 400);
   await expect(host).toHaveAttribute("data-a11y-tool-collapsed", "", {
     timeout: 1500,
   });
+  await expect.poll(() => getHostHeight(page)).toBe(12);
+  await expect.poll(() => getHostTop(page)).toBe(0);
 
   await page.keyboard.press("Alt+Shift+KeyA");
   await expect(host).not.toHaveAttribute("data-a11y-tool-collapsed", "");
   await expect(host.locator('[data-action="reading"]')).toBeFocused();
+  await expect.poll(() => getHostHeight(page)).toBeCloseTo(expandedHeight, 1);
+  await expect.poll(() => getHostTop(page)).toBe(0);
+  await expect.poll(() => getBodyPaddingTop(page)).toBeCloseTo(
+    originalPadding,
+    1,
+  );
 });
 
 test("cycles zoom without scaling the toolbar", async ({ page }) => {
@@ -143,3 +199,29 @@ test("uses the standard Fullscreen API from the same control", async ({ page }) 
     .poll(() => page.evaluate(() => Boolean(document.fullscreenElement)))
     .toBe(false);
 });
+
+async function expectToolbarFixedThroughScroll(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    window.scrollTo(0, document.documentElement.scrollHeight);
+  });
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  await expect.poll(() => getHostTop(page)).toBe(0);
+}
+
+async function getHostTop(page: Page): Promise<number> {
+  return page.locator("[data-a11y-tool-host]").evaluate((element) =>
+    Math.round(element.getBoundingClientRect().top),
+  );
+}
+
+async function getHostHeight(page: Page): Promise<number> {
+  return page.locator("[data-a11y-tool-host]").evaluate(
+    (element) => element.getBoundingClientRect().height,
+  );
+}
+
+async function getBodyPaddingTop(page: Page): Promise<number> {
+  return page.evaluate(() =>
+    Number.parseFloat(getComputedStyle(document.body).paddingTop),
+  );
+}

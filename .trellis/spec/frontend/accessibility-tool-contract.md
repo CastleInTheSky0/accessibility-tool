@@ -89,6 +89,9 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 - Changing `storageKey` must clear any true marker under the previous key. If the runtime is open and persistence remains enabled, migrate the intent to the new derived key.
 - Restoration covers only same-origin navigation where the destination also loads and configures the same tool script. It does not inject into pages without the script, synchronize tabs in real time, or cross origins.
 - Main toolbar order is fixed by `MAIN_FEATURE_ORDER`; feature flags may remove controls but must not reorder the remaining controls.
+- While open, the toolbar Shadow Host is always `position: fixed` at the top of the viewport, including the default unpinned state and `toolbar.layoutMode: "overlay"`; ordinary document scrolling must not move it away from `top: 0`.
+- In the default unpinned `toolbar.layoutMode: "push"` state, page placement reserves the toolbar's runtime height on `body` and applies that same height to configured `toolbar.offsetSelectors`. Closing, destroying, switching to overlay, or pinning restores the exact host-page inline styles owned by the tool.
+- `toolbar.layoutMode: "overlay"` and `isPinned: true` reserve no page space. Pinning keeps the existing delayed auto-collapse, 12px collapsed strip, and expanded overlay behavior; expanding a pinned toolbar must not push the page again.
 - Region value mapping is fixed:
 
 ```text
@@ -170,6 +173,7 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 - Unit: interrupted speech must not emit stale errors.
 - Unit: hidden features must be consistent between main and read-screen toolbars.
 - E2E: lazy open, fixed order, roving toolbar keyboard model, pin/collapse shortcut, zoom isolation, reset, and Fullscreen API.
+- E2E: in Chrome and Edge, real document scrolling keeps the open toolbar Host at viewport `top: 0`; default push mode reserves the measured runtime toolbar height and restores the original page offset on exit, overlay never reserves space, and pin/collapse/expand never reintroduces push placement.
 - E2E: explicit open followed by reload and same-origin navigation restores silently without focus theft; close followed by reload stays closed.
 - E2E: six live region counts, DOM-order navigation, editable-field shortcut exclusion, dynamic add/hide/remove, recovery, and persistence.
 - E2E: Tab, Shift+Tab, pointer, and script focus use one yellow real-node outline; the host outline is overridden only while owned and restores across close/destroy/reopen.
@@ -201,6 +205,13 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 ```js
 // Creates site-specific behavior outside the singleton/config contract.
 document.querySelector(".toolbar").style.cssText = customCss;
+```
+
+```scss
+// Lets the default toolbar scroll away and incorrectly ties viewport anchoring
+// to the persisted pin/auto-collapse state.
+:host { position: absolute !important; }
+:host([data-a11y-tool-pinned]) { position: fixed !important; }
 ```
 
 ```ts
@@ -272,6 +283,15 @@ AccessibilityTool.configure({
 launcher.addEventListener("click", () => {
   void AccessibilityTool.open({ trigger: launcher });
 });
+```
+
+```scss
+// Viewport anchoring is unconditional; push versus overlay placement remains
+// owned by the reversible page-effects controller.
+:host {
+  position: fixed !important;
+  top: 0 !important;
+}
 ```
 
 ```ts

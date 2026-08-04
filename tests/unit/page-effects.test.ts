@@ -2,6 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_CONFIG, mergeConfig } from "../../src/core/config";
 import { isHTMLElement } from "../../src/core/dom";
 import { PageEffectsController } from "../../src/features/page-effects";
+import type {
+  AccessibilityToolConfig,
+  AccessibilityToolState,
+} from "../../src/types";
 import type { ToolbarUI } from "../../src/ui/toolbar";
 
 describe("PageEffectsController focus highlighting", () => {
@@ -188,27 +192,93 @@ describe("PageEffectsController focus highlighting", () => {
   });
 });
 
-function createEffects(ui: ToolbarUI): PageEffectsController {
-  return new PageEffectsController(mergeConfig(DEFAULT_CONFIG), ui, {
+describe("PageEffectsController toolbar placement", () => {
+  it("uses the runtime toolbar height for push placement and restores styles", () => {
+    document.body.innerHTML = '<header id="fixed-header">页头</header>';
+    document.body.style.paddingTop = "7px";
+    const header = getElement("fixed-header");
+    header.style.position = "fixed";
+    header.style.top = "5px";
+    const toolbar = createToolbarMock(136);
+    const effects = createEffects(toolbar.ui, {
+      toolbar: { offsetSelectors: ["#fixed-header"] },
+    });
+
+    effects.apply(createState());
+
+    expect(document.body.style.paddingTop).toBe("calc(7px + 136px)");
+    expect(header.style.top).toBe("calc(5px + 136px)");
+    expect(toolbar.getToolbarHeight).toHaveBeenCalled();
+
+    effects.apply(createState({ isPinned: true }));
+    expect(document.body.style.paddingTop).toBe("7px");
+    expect(header.style.top).toBe("5px");
+
+    effects.apply(createState());
+    effects.deactivate();
+    expect(document.body.style.paddingTop).toBe("7px");
+    expect(header.style.top).toBe("5px");
+  });
+
+  it("keeps overlay mode fixed without reserving page space", () => {
+    document.body.style.paddingTop = "9px";
+    const toolbar = createToolbarMock(144);
+    const effects = createEffects(toolbar.ui, {
+      toolbar: { layoutMode: "overlay" },
+    });
+
+    effects.apply(createState());
+
+    expect(document.body.style.paddingTop).toBe("9px");
+    expect(toolbar.getToolbarHeight).not.toHaveBeenCalled();
+    effects.deactivate();
+    expect(document.body.style.paddingTop).toBe("9px");
+  });
+});
+
+function createEffects(
+  ui: ToolbarUI,
+  config: AccessibilityToolConfig = {},
+): PageEffectsController {
+  return new PageEffectsController(mergeConfig(DEFAULT_CONFIG, config), ui, {
     onFullscreenChange: vi.fn(),
     onError: vi.fn(),
   });
 }
 
-function createToolbarMock() {
+function createToolbarMock(height = 102) {
   const mocks = {
     containsEvent: vi.fn((event: Event) =>
       event.composedPath().some(
         (item) =>
           isHTMLElement(item) && Boolean(item.closest("[data-a11y-tool-host]")),
       )),
-    getToolbarHeight: vi.fn(() => 102),
+    getToolbarHeight: vi.fn(() => height),
     hideCrosshair: vi.fn(),
     hideHighlight: vi.fn(),
     positionCrosshair: vi.fn(),
     positionHighlight: vi.fn(),
   };
   return { ...mocks, ui: mocks as unknown as ToolbarUI };
+}
+
+function createState(
+  overrides: Partial<AccessibilityToolState> = {},
+): AccessibilityToolState {
+  return {
+    isOpen: true,
+    isPinned: false,
+    isCollapsed: false,
+    isReadScreen: false,
+    readingEnabled: false,
+    speechRate: 1,
+    colorScheme: "original",
+    zoom: 1,
+    largeCursor: false,
+    crosshair: false,
+    isFullscreen: false,
+    ...overrides,
+  };
 }
 
 function getElement(id: string): HTMLElement {
