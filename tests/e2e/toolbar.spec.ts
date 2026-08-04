@@ -40,12 +40,12 @@ test("opens lazily and supports the toolbar keyboard model", async ({ page }) =>
   await page.keyboard.press("ArrowRight");
   await expect(rate).toBeFocused();
   await page.keyboard.press("Enter");
-  const ratePanel = host.getByRole("dialog", { name: "语速设置" });
-  await expect(ratePanel).toBeVisible();
-  await ratePanel.getByRole("button", { name: "1.25×" }).click();
   await expect(rate).toHaveAttribute("data-icon-state", "rate-1.25");
-  await page.keyboard.press("Escape");
   await expect(rate).toBeFocused();
+  await expect(host.locator(".a11y-rate-panel")).toHaveCount(0);
+  await expect(rate).not.toHaveAttribute("aria-haspopup", /.+/);
+  await expect(rate).not.toHaveAttribute("aria-expanded", /.+/);
+  await expect(rate).not.toHaveAttribute("aria-controls", /.+/);
 
   const colorScheme = host.locator('[data-action="colorScheme"]');
   await expect(colorScheme).toHaveAttribute(
@@ -118,6 +118,116 @@ test("opens lazily and supports the toolbar keyboard model", async ({ page }) =>
     "data-a11y-color-scheme",
     /.+/,
   );
+});
+
+test("cycles speech rate directly, wraps presets and persists the result", async ({
+  page,
+}) => {
+  await page.evaluate(() => {
+    const spoken: Array<{ rate: number; text: string }> = [];
+    (
+      window as unknown as {
+        __a11yRateSpoken: Array<{ rate: number; text: string }>;
+      }
+    ).__a11yRateSpoken = spoken;
+    window.AccessibilityTool.configure({
+      speech: {
+        defaultRate: 1.1,
+        adapter: {
+          isSupported: () => true,
+          speak: (text, options) => {
+            spoken.push({ rate: options.rate, text });
+            options.onStart?.();
+            options.onEnd?.();
+          },
+          cancel: () => undefined,
+        },
+      },
+    });
+  });
+
+  const launcher = page.getByRole("button", { name: "打开无障碍工具" });
+  await launcher.click();
+  const host = page.locator("[data-a11y-tool-host]");
+  const rate = host.locator('[data-mode="main"] [data-action="speechRate"]');
+  const reading = host.locator('[data-mode="main"] [data-action="reading"]');
+  const status = host.locator('[role="status"]');
+  const expectRate = async (value: number, label: string): Promise<void> => {
+    await expect
+      .poll(() =>
+        page.evaluate(() => window.AccessibilityTool.getState().speechRate),
+      )
+      .toBe(value);
+    await expect(rate).toHaveAttribute("data-icon-state", `rate-${label}`);
+    await expect(rate.locator("[data-control-meta]")).toHaveText(`${label}×`);
+    await expect(rate).toHaveAttribute("aria-label", `语速，当前 ${label} 倍`);
+  };
+
+  await expectRate(1.1, "1.1");
+  await expect(host.locator(".a11y-rate-panel")).toHaveCount(0);
+  await expect(rate).not.toHaveAttribute("aria-haspopup", /.+/);
+  await expect(rate).not.toHaveAttribute("aria-expanded", /.+/);
+  await expect(rate).not.toHaveAttribute("aria-controls", /.+/);
+
+  await reading.click();
+  await expect(reading).toHaveAttribute("aria-pressed", "true");
+  await page.evaluate(() => {
+    (
+      window as unknown as {
+        __a11yRateSpoken: Array<{ rate: number; text: string }>;
+      }
+    ).__a11yRateSpoken.length = 0;
+  });
+
+  await rate.click();
+  await expectRate(1.25, "1.25");
+  await expect(rate).toBeFocused();
+  await expect(status).toHaveText("当前语速 1.25 倍");
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (
+          window as unknown as {
+            __a11yRateSpoken: Array<{ rate: number; text: string }>;
+          }
+        ).__a11yRateSpoken.at(-1),
+      ),
+    )
+    .toEqual({ rate: 1.25, text: "当前语速 1.25 倍" });
+  await expect(reading).toHaveAttribute("aria-pressed", "true");
+
+  await page.keyboard.press("Space");
+  await expectRate(1.5, "1.5");
+  await expect(rate).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expectRate(0.75, "0.75");
+  await expect(rate).toBeFocused();
+  await rate.click();
+  await expectRate(1, "1");
+  await rate.click();
+  await expectRate(1.25, "1.25");
+
+  await reading.click();
+  await expect(reading).toHaveAttribute("aria-pressed", "false");
+  await expectRate(1.25, "1.25");
+
+  await host.locator('[data-mode="main"] [data-action="exit"]').click();
+  await expect(host).not.toBeVisible();
+  await launcher.click();
+  await expectRate(1.25, "1.25");
+  await expect(host.locator(".a11y-rate-panel")).toHaveCount(0);
+
+  const pin = host.locator('[data-mode="main"] [data-action="pin"]');
+  await pin.click();
+  await rate.focus();
+  await page.mouse.move(500, 70);
+  await page.mouse.move(500, 400);
+  await expect(host).toHaveAttribute("data-a11y-tool-collapsed", "", {
+    timeout: 500,
+  });
+  await expect(
+    host.getByRole("button", { name: "展开无障碍工具栏" }),
+  ).toBeFocused();
 });
 
 test("keeps all main controls on one centered row from 1024 to 2048 pixels", async ({

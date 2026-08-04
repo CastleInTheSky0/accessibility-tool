@@ -18,7 +18,6 @@ export type ToolbarAction = FeatureId | `region:${RegionType}` | "screenSound";
 
 interface ToolbarCallbacks {
   onAction: (action: ToolbarAction, control: HTMLElement) => void;
-  onRateChange: (rate: number, control: HTMLElement) => void;
   onCollapsedChange: (collapsed: boolean) => void;
   onFocusInside?: () => void;
 }
@@ -151,9 +150,6 @@ export class ToolbarUI {
   private readonly brandRail: HTMLDivElement;
   private readonly mainGroup: HTMLDivElement;
   private readonly screenGroup: HTMLDivElement;
-  private readonly ratePanel: HTMLDivElement;
-  private rateSlider!: HTMLInputElement;
-  private rateValue!: HTMLOutputElement;
   private readonly liveRegion: HTMLDivElement;
   private readonly revealButton: HTMLButtonElement;
   private readonly horizontalLine: HTMLDivElement;
@@ -175,7 +171,6 @@ export class ToolbarUI {
   private state: AccessibilityToolState | null = null;
   private config: ResolvedAccessibilityToolConfig;
   private collapseTimer: number | null = null;
-  private ratePanelOpen = false;
 
   constructor(
     private readonly host: HTMLElement,
@@ -217,8 +212,6 @@ export class ToolbarUI {
     this.toolbarFrame.append(this.brandRail, this.mainGroup, this.screenGroup);
     this.toolbar.append(this.toolbarFrame);
 
-    this.ratePanel = this.buildRatePanel();
-
     this.revealButton = document.createElement("button");
     this.revealButton.type = "button";
     this.revealButton.className = "a11y-reveal";
@@ -238,7 +231,6 @@ export class ToolbarUI {
 
     this.root.append(
       this.toolbar,
-      this.ratePanel,
       this.revealButton,
       this.liveRegion,
       this.horizontalLine,
@@ -274,7 +266,6 @@ export class ToolbarUI {
   }
 
   hide(): void {
-    this.closeRatePanel(false);
     this.cancelCollapse();
     this.setCurrentRegion(null);
     this.hideCrosshair();
@@ -328,8 +319,6 @@ export class ToolbarUI {
       this.updateControlIcon("screenSound", sound, state);
     }
 
-    this.rateSlider.value = String(state.speechRate);
-    this.rateValue.value = `${formatRate(state.speechRate)}×`;
     this.updateAvailability();
 
     if (!state.isPinned) {
@@ -414,35 +403,13 @@ export class ToolbarUI {
     }, 20);
   }
 
-  toggleRatePanel(): void {
-    if (this.ratePanelOpen) {
-      this.closeRatePanel(true);
-    } else {
-      this.openRatePanel();
-    }
-  }
-
-  closeRatePanel(returnFocus: boolean): void {
-    if (!this.ratePanelOpen) {
-      return;
-    }
-    this.ratePanelOpen = false;
-    this.ratePanel.hidden = true;
-    const button = this.controls.get("speechRate");
-    button?.setAttribute("aria-expanded", "false");
-    if (returnFocus) {
-      this.focusAction("speechRate");
-    }
-    this.scheduleCollapse();
-  }
-
   expandAndFocus(): void {
     this.setCollapsed(false);
     this.focusFirst();
   }
 
   setCollapsed(collapsed: boolean): void {
-    if (!this.state?.isPinned || this.ratePanelOpen) {
+    if (!this.state?.isPinned) {
       collapsed = false;
     }
     const current = this.host.hasAttribute("data-a11y-tool-collapsed");
@@ -458,7 +425,6 @@ export class ToolbarUI {
     this.cancelCollapse();
     if (
       !this.state?.isPinned ||
-      this.ratePanelOpen ||
       this.root.matches(":hover") ||
       this.root.contains(
         (this.root.getRootNode() as Document | ShadowRoot).activeElement,
@@ -472,7 +438,7 @@ export class ToolbarUI {
   }
 
   private collapseFromPointerLeave(): void {
-    if (!this.state?.isPinned || this.ratePanelOpen) {
+    if (!this.state?.isPinned) {
       return;
     }
     this.cancelCollapse();
@@ -602,10 +568,6 @@ export class ToolbarUI {
     if (regionType) {
       control.dataset.regionControl = regionType;
     }
-    if (action === "speechRate") {
-      control.setAttribute("aria-haspopup", "dialog");
-      control.setAttribute("aria-expanded", "false");
-    }
     if (SWITCH_FEATURES.has(action as FeatureId) || action === "screenSound") {
       control.setAttribute("aria-pressed", "false");
     }
@@ -629,55 +591,6 @@ export class ToolbarUI {
     return control;
   }
 
-  private buildRatePanel(): HTMLDivElement {
-    const panel = document.createElement("div");
-    panel.className = "a11y-rate-panel";
-    panel.id = `${this.host.id}-rate-panel`;
-    panel.role = "dialog";
-    panel.setAttribute("aria-label", "语速设置");
-    panel.hidden = true;
-
-    const heading = document.createElement("div");
-    heading.className = "a11y-rate-panel__heading";
-    heading.textContent = "选择朗读速度";
-
-    const presets = document.createElement("div");
-    presets.className = "a11y-rate-panel__presets";
-    presets.role = "group";
-    presets.setAttribute("aria-label", "语速预设");
-    for (const rate of [0.75, 1, 1.25, 1.5]) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "a11y-rate-preset";
-      button.dataset.rate = String(rate);
-      button.textContent = `${formatRate(rate)}×`;
-      presets.append(button);
-    }
-
-    const sliderLabel = document.createElement("label");
-    sliderLabel.className = "a11y-rate-panel__slider-label";
-    sliderLabel.htmlFor = `${this.host.id}-rate-slider`;
-    sliderLabel.textContent = "精细调整";
-
-    this.rateSlider = document.createElement("input");
-    this.rateSlider.id = `${this.host.id}-rate-slider`;
-    this.rateSlider.type = "range";
-    this.rateSlider.min = "0.5";
-    this.rateSlider.max = "2";
-    this.rateSlider.step = "0.05";
-    this.rateSlider.value = "1";
-
-    this.rateValue = document.createElement("output");
-    this.rateValue.className = "a11y-rate-panel__value";
-    this.rateValue.htmlFor = this.rateSlider.id;
-    this.rateValue.value = "1×";
-
-    panel.append(heading, presets, sliderLabel, this.rateSlider, this.rateValue);
-    const rateButton = this.controls.get("speechRate");
-    rateButton?.setAttribute("aria-controls", panel.id);
-    return panel;
-  }
-
   private bindEvents(): void {
     this.toolbar.addEventListener("click", (event) => {
       const control = (event.target as Element).closest<HTMLElement>(
@@ -692,27 +605,6 @@ export class ToolbarUI {
 
     this.toolbar.addEventListener("keydown", (event) => {
       this.handleToolbarKeydown(event);
-    });
-
-    this.ratePanel.addEventListener("click", (event) => {
-      const button = (event.target as Element).closest<HTMLButtonElement>(
-        "[data-rate]",
-      );
-      if (!button) {
-        return;
-      }
-      this.callbacks.onRateChange(Number(button.dataset.rate), button);
-      this.rateSlider.focus();
-    });
-    this.rateSlider.addEventListener("input", () => {
-      this.callbacks.onRateChange(Number(this.rateSlider.value), this.rateSlider);
-    });
-    this.ratePanel.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        this.closeRatePanel(true);
-      }
     });
 
     this.revealButton.addEventListener("click", () => this.expandAndFocus());
@@ -795,18 +687,6 @@ export class ToolbarUI {
     for (const item of this.getNavigableItems()) {
       item.tabIndex = item === active ? 0 : -1;
     }
-  }
-
-  private openRatePanel(): void {
-    this.cancelCollapse();
-    this.ratePanelOpen = true;
-    this.ratePanel.hidden = false;
-    const button = this.controls.get("speechRate");
-    button?.setAttribute("aria-expanded", "true");
-    const currentPreset = this.ratePanel.querySelector<HTMLButtonElement>(
-      `[data-rate="${this.state?.speechRate ?? 1}"]`,
-    );
-    (currentPreset ?? this.rateSlider).focus();
   }
 
   private updateAvailability(): void {

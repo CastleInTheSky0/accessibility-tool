@@ -42,6 +42,8 @@ interface OpenBehavior {
   announceIfAlreadyOpen: boolean;
 }
 
+const SPEECH_RATE_PRESETS = [0.75, 1, 1.25, 1.5] as const;
+
 export class AccessibilityToolRuntime implements AccessibilityToolApi {
   private baseConfig = mergeConfig(DEFAULT_CONFIG);
   private activeConfig = this.baseConfig;
@@ -453,7 +455,6 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
       onAction: (action, control) => {
         void this.handleAction(action, control);
       },
-      onRateChange: (rate) => this.setSpeechRate(rate),
       onCollapsedChange: (collapsed) => this.handleCollapsedChange(collapsed),
       onFocusInside: () => {
         this.effects?.clearFocusHighlight();
@@ -637,7 +638,7 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
         this.setReadingEnabled(!this.state.readingEnabled);
         break;
       case "speechRate":
-        this.ui?.toggleRatePanel();
+        this.cycleSpeechRate();
         break;
       case "colorScheme":
         this.cycleColorScheme();
@@ -698,10 +699,12 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
     this.announce(`朗读已${enabled ? "开启" : "关闭"}`, enabled);
   }
 
-  private setSpeechRate(rate: number): void {
-    const normalized = clamp(Number(rate.toFixed(2)), 0.5, 2);
-    this.commitState({ speechRate: normalized });
-    this.announce(`当前语速 ${formatNumber(normalized)} 倍`, false);
+  private cycleSpeechRate(): void {
+    const next =
+      SPEECH_RATE_PRESETS.find((rate) => rate > this.state.speechRate) ??
+      SPEECH_RATE_PRESETS[0];
+    this.commitState({ speechRate: next });
+    this.announce(`当前语速 ${formatNumber(next)} 倍`);
   }
 
   private cycleColorScheme(): void {

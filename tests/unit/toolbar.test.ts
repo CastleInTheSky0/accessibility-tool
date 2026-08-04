@@ -167,7 +167,6 @@ describe("ToolbarUI", () => {
     });
     const ui = new ToolbarUI(host, shadow, config, {
       onAction: vi.fn(),
-      onRateChange: vi.fn(),
       onCollapsedChange: vi.fn(),
     });
     ui.updateState({ ...defaultState, isReadScreen: true });
@@ -196,7 +195,6 @@ describe("ToolbarUI", () => {
     const shadow = host.attachShadow({ mode: "open" });
     const ui = new ToolbarUI(host, shadow, mergeConfig(DEFAULT_CONFIG), {
       onAction: vi.fn(),
-      onRateChange: vi.fn(),
       onCollapsedChange: vi.fn(),
     });
     const target = document.createElement("button");
@@ -297,6 +295,11 @@ describe("ToolbarUI", () => {
     const color = getControl(shadow, "colorScheme");
     const zoomIn = getControl(shadow, "zoomIn");
     const zoomOut = getControl(shadow, "zoomOut");
+
+    expect(shadow.querySelector(".a11y-rate-panel")).toBeNull();
+    expect(rate.hasAttribute("aria-haspopup")).toBe(false);
+    expect(rate.hasAttribute("aria-expanded")).toBe(false);
+    expect(rate.hasAttribute("aria-controls")).toBe(false);
 
     ui.updateState({ ...defaultState, speechRate: 0.5, zoom: 0.75 });
     expectIconState(rate, "rate-0.5");
@@ -414,6 +417,12 @@ describe("ToolbarUI", () => {
       expect(host.hasAttribute("data-a11y-tool-collapsed")).toBe(false);
       expect(shadow.activeElement).toBe(getControl(shadow, "reading"));
       expect(onCollapsedChange).toHaveBeenLastCalledWith(false);
+
+      const rate = getControl(shadow, "speechRate");
+      rate.focus();
+      root?.dispatchEvent(new Event("pointerleave"));
+      expect(host.hasAttribute("data-a11y-tool-collapsed")).toBe(true);
+      expect(shadow.activeElement).toBe(reveal);
     } finally {
       vi.clearAllTimers();
       vi.useRealTimers();
@@ -569,7 +578,6 @@ function createToolbar(
   const shadow = host.attachShadow({ mode: "open" });
   const ui = new ToolbarUI(host, shadow, config, {
     onAction: vi.fn(),
-    onRateChange: vi.fn(),
     onCollapsedChange,
   });
   return { host, shadow, ui };
