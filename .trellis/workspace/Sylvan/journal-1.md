@@ -137,3 +137,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: 修复工具栏滚动吸顶与页面占位
+
+**Date**: 2026-08-04
+**Task**: 修复工具栏滚动吸顶与页面占位
+**Branch**: `feat/accessibility-tool-v0.1`
+
+### Summary
+
+默认工具栏 Host 改为固定吸顶，push 模式继续使用运行时高度为页面占位；overlay 与固定自动收起逻辑保持不变，并新增 Chrome、Edge 真实滚动 E2E 及页面占位单测。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `576b0b2` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
