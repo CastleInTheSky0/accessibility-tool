@@ -79,6 +79,95 @@ describe("RegionScanner", () => {
     scanner.stop();
   });
 
+  it("retains explicitly marked hidden tab panels and resolves their tab names", () => {
+    document.body.innerHTML = `
+      <style>[role="tabpanel"][data-a11y-hidden] { display: none; }</style>
+      <div role="tablist">
+        <button id="tab-overview" role="tab" aria-controls="panel-overview">概览</button>
+        <button id="tab-protocol" role="tab" aria-controls="panel-protocol" data-a11y-label="属性协议短名">属性协议</button>
+        <button id="tab-unmarked" role="tab" aria-controls="panel-unmarked">未标记</button>
+      </div>
+      <section id="panel-overview" role="tabpanel" aria-labelledby="tab-overview" data-a11y-region="viewport" data-a11y-hidden></section>
+      <section id="panel-protocol" role="tabpanel" data-a11y-region="viewport" data-a11y-hidden></section>
+      <section id="panel-unmarked" role="tabpanel" data-a11y-hidden></section>
+      <section id="ordinary-hidden" data-a11y-region="viewport" hidden></section>
+    `;
+
+    let regions: readonly ScannedRegion[] = [];
+    const scanner = new RegionScanner(
+      mergeConfig(DEFAULT_CONFIG, {
+        regions: { autoDetect: false, observe: false },
+      }),
+      {
+        onUpdate: (next) => {
+          regions = next;
+        },
+        onRouteChange: vi.fn(),
+        onError: vi.fn(),
+      },
+    );
+    scanner.start();
+
+    expect(find(regions, "panel-overview")).toMatchObject({
+      type: "viewport",
+      label: "概览",
+      linkedTab: document.getElementById("tab-overview"),
+    });
+    expect(find(regions, "panel-protocol")).toMatchObject({
+      type: "viewport",
+      label: "属性协议短名",
+      linkedTab: document.getElementById("tab-protocol"),
+    });
+    expect(find(regions, "panel-unmarked")).toBeUndefined();
+    expect(find(regions, "ordinary-hidden")).toBeUndefined();
+    scanner.stop();
+  });
+
+  it("retains hidden panel regions in open shadow roots and same-origin iframes", () => {
+    document.body.innerHTML = `<div id="host"></div><iframe id="frame"></iframe>`;
+    const host = document.getElementById("host");
+    const shadowRoot = host?.attachShadow({ mode: "open" });
+    if (!shadowRoot) {
+      throw new Error("Missing shadow root");
+    }
+    shadowRoot.innerHTML = `
+      <style>[data-a11y-hidden] { display: none; }</style>
+      <div role="tablist"><button id="shadow-tab" role="tab" aria-controls="shadow-panel">影子选项</button></div>
+      <section id="shadow-panel" role="tabpanel" data-a11y-region="viewport" data-a11y-hidden></section>
+    `;
+    const frame = document.getElementById("frame") as HTMLIFrameElement | null;
+    const frameDocument = frame?.contentDocument;
+    if (!frameDocument) {
+      throw new Error("Missing iframe document");
+    }
+    frameDocument.body.innerHTML = `
+      <style>[data-a11y-hidden] { display: none; }</style>
+      <div role="tablist"><button id="frame-tab" role="tab" aria-controls="frame-panel">框架选项</button></div>
+      <section id="frame-panel" role="tabpanel" data-a11y-region="viewport" data-a11y-hidden></section>
+    `;
+
+    let regions: readonly ScannedRegion[] = [];
+    const scanner = new RegionScanner(
+      mergeConfig(DEFAULT_CONFIG, {
+        regions: { autoDetect: false, observe: false },
+      }),
+      {
+        onUpdate: (next) => {
+          regions = next;
+        },
+        onRouteChange: vi.fn(),
+        onError: vi.fn(),
+      },
+    );
+    scanner.start();
+
+    expect(find(regions, "shadow-panel")?.label).toBe("影子选项");
+    expect(find(regions, "frame-panel")?.label).toBe("框架选项");
+    expect(find(regions, "shadow-panel")?.linkedTab?.id).toBe("shadow-tab");
+    expect(find(regions, "frame-panel")?.linkedTab?.id).toBe("frame-tab");
+    scanner.stop();
+  });
+
   it("does not overwrite a newer history integration when stopped", () => {
     const originalPushState: History["pushState"] = Reflect.get(
       history,

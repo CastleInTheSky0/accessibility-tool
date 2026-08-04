@@ -18,8 +18,8 @@ describe("RegionNavigationController", () => {
     controller.update(regions, [document], "initial");
     expect(first.getAttribute("tabindex")).toBe("0");
     expect(last.getAttribute("tabindex")).toBe("0");
-    controller.navigate("service");
-    controller.navigate("service");
+    void controller.navigate("service");
+    void controller.navigate("service");
     expect(document.activeElement).toBe(last);
     announce.mockClear();
 
@@ -47,7 +47,7 @@ describe("RegionNavigationController", () => {
     const controller = createController(effects, announce);
     controller.start();
     controller.update([region(first), region(second)], [document], "initial");
-    controller.navigate("service");
+    void controller.navigate("service");
     announce.mockClear();
 
     controller.update(
@@ -78,7 +78,7 @@ describe("RegionNavigationController", () => {
     const controller = createController(effects);
     controller.start();
     controller.update([region(activeRegion)], [document], "initial");
-    controller.navigate("service");
+    void controller.navigate("service");
     effects.clearRegionHighlight.mockClear();
 
     get("inside-a").focus();
@@ -105,11 +105,11 @@ describe("RegionNavigationController", () => {
     controller.start();
     controller.update([region(first), region(second)], [document], "initial");
 
-    controller.navigate("service");
+    void controller.navigate("service");
     expect(first.getAttribute("tabindex")).toBe("0");
     expect(first.style.getPropertyValue("scroll-margin-top")).toBe("118px");
 
-    controller.navigate("service");
+    void controller.navigate("service");
     expect(first.getAttribute("tabindex")).toBe("0");
     expect(first.style.getPropertyValue("scroll-margin-top")).toBe("24px");
     expect(first.style.getPropertyPriority("scroll-margin-top")).toBe(
@@ -117,7 +117,7 @@ describe("RegionNavigationController", () => {
     );
     expect(second.getAttribute("tabindex")).toBe("0");
 
-    controller.navigate("service");
+    void controller.navigate("service");
     expect(second.getAttribute("tabindex")).toBe("0");
     expect(first.getAttribute("tabindex")).toBe("0");
 
@@ -189,7 +189,7 @@ describe("RegionNavigationController", () => {
       "initial",
     );
 
-    controller.navigate("viewport");
+    void controller.navigate("viewport");
 
     expect(announce).toHaveBeenCalledTimes(1);
     expect(announce).toHaveBeenCalledWith(
@@ -199,7 +199,7 @@ describe("RegionNavigationController", () => {
       expect.objectContaining({ label: "要闻" }),
     );
 
-    controller.navigate("viewport");
+    void controller.navigate("viewport");
     expect(announce).toHaveBeenCalledTimes(2);
     expect(announce).toHaveBeenNthCalledWith(
       2,
@@ -230,9 +230,9 @@ describe("RegionNavigationController", () => {
       "initial",
     );
 
-    controller.navigate("navigation");
-    controller.navigate("content");
-    controller.navigate("viewport");
+    void controller.navigate("navigation");
+    void controller.navigate("content");
+    void controller.navigate("viewport");
 
     expect(announce).toHaveBeenNthCalledWith(
       1,
@@ -326,17 +326,247 @@ describe("RegionNavigationController", () => {
     expect(get("aria-image-button").hasAttribute("tabindex")).toBe(false);
     expect(get("aria-checkbox").getAttribute("tabindex")).toBe("-1");
   });
+
+  it("returns only an exact explicit scanned type, including hidden linked panels", () => {
+    document.body.innerHTML = `
+      <style>[data-a11y-hidden] { display: none; }</style>
+      <section id="outer"><button id="child">内部节点</button></section>
+      <button id="tab" role="tab">面板选项</button>
+      <section id="hidden-panel" data-a11y-hidden></section>
+      <section id="semantic-panel"></section>
+    `;
+    const hidden: ScannedRegion = {
+      ...region(get("hidden-panel"), "viewport", "隐藏面板"),
+      linkedTab: get("tab"),
+    };
+    const semantic: ScannedRegion = {
+      ...region(get("semantic-panel"), "service", "语义区域"),
+      source: "semantic",
+    };
+    const controller = createController();
+    controller.start();
+    controller.update(
+      [region(get("outer"), "content", "外层"), hidden, semantic],
+      [document],
+      "initial",
+    );
+
+    expect(controller.getExplicitRegionType(get("outer"))).toBe("content");
+    expect(controller.getExplicitRegionType(hidden.element)).toBe("viewport");
+    expect(controller.getExplicitRegionType(get("child"))).toBeNull();
+    expect(controller.getExplicitRegionType(semantic.element)).toBeNull();
+    controller.stop();
+  });
+
+  it("activates hidden linked panels before committing navigation", async () => {
+    document.body.innerHTML = `
+      <style>[data-a11y-hidden] { display: none; }</style>
+      <button id="tab-hidden" role="tab">隐藏面板选项</button>
+      <section id="panel-visible"></section>
+      <section id="panel-hidden" data-a11y-hidden aria-hidden="true"><button id="panel-control">面板按钮</button></section>
+    `;
+    const visible = region(get("panel-visible"), "viewport", "可见");
+    const hidden: ScannedRegion = {
+      ...region(get("panel-hidden"), "viewport", "隐藏"),
+      linkedTab: get("tab-hidden"),
+    };
+    const announce = vi.fn();
+    const activate = vi.fn(() => {
+      hidden.element.removeAttribute("data-a11y-hidden");
+      hidden.element.setAttribute("aria-hidden", "false");
+      return Promise.resolve(true);
+    });
+    const controller = createController(
+      createEffects(),
+      announce,
+      vi.fn(),
+      activate,
+    );
+    controller.start();
+    controller.update([visible, hidden], [document], "initial");
+
+    expect(hidden.element.hasAttribute("tabindex")).toBe(false);
+    await controller.navigate("viewport");
+    await controller.navigate("viewport");
+
+    expect(activate).toHaveBeenCalledWith(hidden);
+    expect(document.activeElement).toBe(hidden.element);
+    expect(hidden.element.getAttribute("tabindex")).toBe("0");
+    expect(announce).toHaveBeenLastCalledWith(
+      "提示：您已进入隐藏视窗区，按下 Tab 键浏览信息；第 2 个，共 2 个",
+    );
+    controller.stop();
+  });
+
+  it("does not commit failed or stale hidden-panel navigation", async () => {
+    document.body.innerHTML = `
+      <style>[data-a11y-hidden] { display: none; }</style>
+      <button id="tab-hidden" role="tab">隐藏面板选项</button>
+      <section id="panel-visible"></section>
+      <section id="panel-hidden" data-a11y-hidden aria-hidden="true"><button id="panel-control">面板按钮</button></section>
+    `;
+    const visible = region(get("panel-visible"), "viewport", "可见");
+    const hidden: ScannedRegion = {
+      ...region(get("panel-hidden"), "viewport", "隐藏"),
+      linkedTab: get("tab-hidden"),
+    };
+    const announce = vi.fn();
+    let resolveActivation: ((ready: boolean) => void) | undefined;
+    const activation = new Promise<boolean>((resolve) => {
+      resolveActivation = resolve;
+    });
+    const onRegionChange = vi.fn();
+    const controller = createController(
+      createEffects(),
+      announce,
+      onRegionChange,
+      () => activation,
+    );
+    controller.start();
+    controller.update([visible, hidden], [document], "initial");
+    await controller.navigate("viewport");
+    announce.mockClear();
+    onRegionChange.mockClear();
+
+    const stale = controller.navigate("viewport");
+    const latest = controller.navigate("viewport");
+    hidden.element.removeAttribute("data-a11y-hidden");
+    hidden.element.setAttribute("aria-hidden", "false");
+    get("panel-control").focus();
+    expect(onRegionChange).not.toHaveBeenCalled();
+    resolveActivation?.(true);
+
+    await expect(stale).resolves.toBe(false);
+    await expect(latest).resolves.toBe(true);
+    expect(announce).toHaveBeenCalledTimes(1);
+    expect(onRegionChange).toHaveBeenCalledTimes(1);
+    expect(announce).not.toHaveBeenCalledWith("关联内容面板未能打开");
+
+    hidden.element.setAttribute("data-a11y-hidden", "");
+    hidden.element.setAttribute("aria-hidden", "true");
+    const failedController = createController(
+      createEffects(),
+      announce,
+      vi.fn(),
+      () => Promise.resolve(false),
+    );
+    failedController.start();
+    failedController.update([visible, hidden], [document], "initial");
+    announce.mockClear();
+    await expect(failedController.navigate("viewport")).resolves.toBe(true);
+    await expect(failedController.navigate("viewport")).resolves.toBe(false);
+    expect(document.activeElement).toBe(visible.element);
+    expect(announce).toHaveBeenCalledWith("关联内容面板未能打开");
+    failedController.stop();
+    controller.stop();
+  });
+
+  it("defers recovery while a delayed hidden-panel activation is pending", async () => {
+    document.body.innerHTML = `
+      <style>[data-a11y-hidden] { display: none; }</style>
+      <button id="tab-current" role="tab">当前面板选项</button>
+      <button id="tab-target" role="tab">目标面板选项</button>
+      <section id="panel-current"></section>
+      <section id="panel-target" data-a11y-hidden aria-hidden="true"></section>
+      <section id="panel-fallback"></section>
+    `;
+    const current: ScannedRegion = {
+      ...region(get("panel-current"), "viewport", "当前"),
+      linkedTab: get("tab-current"),
+    };
+    const target: ScannedRegion = {
+      ...region(get("panel-target"), "viewport", "目标"),
+      linkedTab: get("tab-target"),
+    };
+    const fallback = region(get("panel-fallback"), "viewport", "回退");
+    let resolveActivation: ((ready: boolean) => void) | undefined;
+    const activation = new Promise<boolean>((resolve) => {
+      resolveActivation = resolve;
+    });
+    const announce = vi.fn();
+    const onRegionChange = vi.fn();
+    const effects = createEffects();
+    const controller = createController(
+      effects,
+      announce,
+      onRegionChange,
+      () => activation,
+    );
+    controller.start();
+    controller.update([current, target, fallback], [document], "initial");
+    await controller.navigate("viewport");
+    announce.mockClear();
+    onRegionChange.mockClear();
+    effects.clearRegionHighlight.mockClear();
+
+    const pending = controller.navigate("viewport");
+    current.element.setAttribute("data-a11y-hidden", "");
+    current.element.setAttribute("aria-hidden", "true");
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    controller.update([current, target, fallback], [document], "mutation");
+
+    expect(document.activeElement).not.toBe(fallback.element);
+    expect(onRegionChange).not.toHaveBeenCalled();
+    expect(announce).not.toHaveBeenCalled();
+    expect(effects.clearRegionHighlight).toHaveBeenCalledWith(current.element);
+
+    target.element.removeAttribute("data-a11y-hidden");
+    target.element.setAttribute("aria-hidden", "false");
+    controller.update([current, target, fallback], [document], "mutation");
+    resolveActivation?.(true);
+
+    await expect(pending).resolves.toBe(true);
+    expect(document.activeElement).toBe(target.element);
+    expect(onRegionChange).toHaveBeenCalledTimes(1);
+    expect(onRegionChange).toHaveBeenCalledWith(
+      expect.objectContaining({ element: target.element, index: 1, count: 3 }),
+    );
+    expect(announce.mock.calls).toEqual([
+      ["提示：您已进入目标视窗区，按下 Tab 键浏览信息；第 2 个，共 3 个"],
+    ]);
+    controller.stop();
+  });
+
+  it("can focus a panel region without the generic region announcement", () => {
+    document.body.innerHTML = `
+      <section id="panel"></section>
+      <button id="outside">外部</button>
+    `;
+    const panel = get("panel");
+    const announce = vi.fn();
+    const controller = createController(createEffects(), announce);
+    controller.start();
+    controller.update(
+      [region(panel, "viewport", "概览")],
+      [document],
+      "initial",
+    );
+
+    controller.focusWithoutRegionAnnouncement(panel);
+    expect(document.activeElement).toBe(panel);
+    expect(announce).not.toHaveBeenCalled();
+
+    get("outside").focus();
+    panel.focus();
+    expect(announce).toHaveBeenCalledWith(
+      "提示：您已进入概览视窗区，按下 Tab 键浏览信息；第 1 个，共 1 个",
+    );
+    controller.stop();
+  });
 });
 
 function createController(
   effects = createEffects(),
   onAnnounce = vi.fn(),
   onRegionChange = vi.fn(),
+  requestRegionVisibility?: (region: ScannedRegion) => Promise<boolean>,
 ): RegionNavigationController {
   return new RegionNavigationController(
     effects,
     {
       getToolbarOffset: () => 102,
+      ...(requestRegionVisibility ? { requestRegionVisibility } : {}),
       onCountsChange: vi.fn(),
       onAnnounce,
       onRegionChange,

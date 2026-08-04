@@ -76,6 +76,7 @@ await AccessibilityTool.open({ trigger: openButton });
 <section
   id="panel-news"
   role="tabpanel"
+  data-a11y-region="viewport"
   aria-labelledby="tab-news"
 ></section>
 ```
@@ -88,9 +89,13 @@ await AccessibilityTool.open({ trigger: openButton });
 }
 ```
 
-工具通过 `aria-controls` 和 ID 关联，不按 DOM 邻接关系猜测。每个有效选项都会进入原生 Tab 顺序，可使用 Tab/Shift+Tab 逐项切换，也保留方向键与 Home/End。`data-a11y-activation` 和 `data-a11y-trigger-event` 只在对应的 `role="tab"` 选项节点上声明：自动模式在选项获得焦点时切换面板，手动模式需按 Enter 或空格。未声明或无效的激活模式回退到 `tabs.defaultActivation`；触发事件未声明或为空时回退到 `tabs.triggerEvents`，最终使用 `click`。多个事件使用空格分隔并自动去重，`role="tablist"` 只负责标准分组和方向语义。
+工具通过 `aria-controls` 和 ID 关联，不按 DOM 邻接关系猜测。接入方可在需要纳入盲道的面板上显式添加 `data-a11y-region`；工具不会自动为所有 `role="tabpanel"` 推测分类。面板无需重复填写 `data-a11y-label`，默认从关联选项取得名称；确有需要时仍可用面板自己的 `data-a11y-label` 覆盖。该显式分类不受 `regions.autoDetect: false` 影响。
 
-有效选项每次通过 Tab、Shift+Tab、方向键、点击或脚本获得焦点时，只朗读一条完整提示，例如 `Tab，概览，正文区，当前有浮动窗口，按 ALT+下键进入窗口`；带 `href` 的链接选项使用 `链接：概览，Tab，正文区...`。区域部分来自选项所在的真实盲道区域分类，不包含区域短名称；不在已识别区域时自然省略。Alt+下进入面板后朗读来源选项与区域分类，Esc 成功返回时只朗读 `已返回{选项名称}选项`。若面板没有可通过 Tab 聚焦的后代，会明确提示暂无可遍历信息，工具不会为静态内容增加 `tabindex`。
+每个有效选项都会进入原生 Tab 顺序，可使用 Tab/Shift+Tab 逐项切换，也保留方向键与 Home/End。`data-a11y-activation` 和 `data-a11y-trigger-event` 只在对应的 `role="tab"` 选项节点上声明：自动模式在选项获得焦点时切换面板，手动模式需按 Enter 或空格。未声明或无效的激活模式回退到 `tabs.defaultActivation`；触发事件未声明或为空时回退到 `tabs.triggerEvents`，最终使用 `click`。多个事件使用空格分隔并自动去重，`role="tablist"` 只负责标准分组和方向语义。
+
+有效选项每次通过 Tab、Shift+Tab、方向键、点击或脚本获得焦点时，只朗读一条完整提示，例如 `Tab，概览，视窗区，当前有浮动窗口，按 ALT+下键进入窗口`；带 `href` 的链接选项使用 `链接：概览，Tab，视窗区...`。区域部分只继承关联面板自身的显式盲道分类，不读取选项所在的外层区域，也不包含区域短名称；关联面板未显式分类时自然省略。选项本身不会作为第二个盲道区域计数。Alt+下进入面板后使用同一分类朗读，Esc 成功返回时只朗读 `已返回{选项名称}选项`。若面板没有可通过 Tab 聚焦的后代，会明确提示暂无可遍历信息，工具不会为静态内容增加 `tabindex`。
+
+显式标记为区域的隐藏关联面板仍保留在分类数量和页面结构顺序中，但显示前不会获得区域 `tabindex`，普通 Tab 不会进入。快捷键或工具栏分类导航命中它时，工具复用来源选项的页面原事件，等待面板真正显示后再聚焦并朗读；显示失败或请求已过期时不会误报进入成功。
 
 接入站点原有事件负责添加或移除 `data-a11y-hidden`，宿主 `role="tabpanel"` 不直接使用原生 `hidden`。工具不会控制业务面板的视觉显隐，只触发所配置的页面原事件并同步 `aria-selected` / `aria-hidden`；两类属性必须分别保留。原生 `<dialog>` 仍使用 `showModal()`、`open` 和 `close()`。
 

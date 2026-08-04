@@ -23,6 +23,7 @@ interface RegionHighlightController {
 
 interface RegionNavigationCallbacks {
   getToolbarOffset: () => number;
+  requestRegionVisibility?: (region: ScannedRegion) => Promise<boolean>;
   onCountsChange: (counts: Readonly<Record<RegionType, number>>) => void;
   onAnnounce: (message: string) => void;
   onRegionChange: (event: RegionChangeEvent) => void;
@@ -52,6 +53,11 @@ export class RegionNavigationController {
   private currentIndex = -1;
   private roots: readonly (Document | ShadowRoot)[] = [];
   private suppressedFocusAnnouncement: HTMLElement | null = null;
+  private pendingVisibilityRequest: {
+    id: number;
+    element: HTMLElement;
+  } | null = null;
+  private navigationRequestId = 0;
   private started = false;
 
   constructor(
@@ -67,6 +73,8 @@ export class RegionNavigationController {
 
   stop(): void {
     this.started = false;
+    this.navigationRequestId += 1;
+    this.pendingVisibilityRequest = null;
     this.detachRootListeners();
     this.roots = [];
     this.clearActiveRegion();
@@ -101,7 +109,17 @@ export class RegionNavigationController {
         !isVisible(previousCurrent.element) ||
         !currentStillTracked)
     ) {
-      this.recoverRemovedRegion(previousCurrent.type, previousIndex);
+      if (this.pendingVisibilityRequest) {
+        this.current = previousCurrent;
+        this.currentIndex = previousIndex;
+        this.effects.clearRegionHighlight(previousCurrent.element);
+      } else {
+        this.recoverRemovedRegion(
+          previousCurrent.type,
+          previousIndex,
+          currentStillTracked,
+        );
+      }
     } else if (previousCurrent) {
       const sameType = this.getRegions(previousCurrent.type);
       this.currentIndex = sameType.findIndex(
@@ -131,7 +149,8 @@ export class RegionNavigationController {
     this.effects.clearRegionHighlight();
   }
 
-  navigate(type: RegionType): boolean {
+  async navigate(type: RegionType): Promise<boolean> {
+    const requestId = ++this.navigationRequestId;
     const regions = this.getRegions(type);
     if (regions.length === 0) {
       this.callbacks.onAnnounce(`当前页面没有${REGION_LABELS[type]}`);
@@ -139,12 +158,56 @@ export class RegionNavigationController {
     }
     const last = this.lastIndexes.get(type) ?? -1;
     const nextIndex = (last + 1) % regions.length;
-    const region = regions[nextIndex];
+    let region = regions[nextIndex];
     if (!region) {
       return false;
     }
+    if (!isVisible(region.element)) {
+      const targetElement = region.element;
+      const targetType = region.type;
+      this.pendingVisibilityRequest = {
+        id: requestId,
+        element: targetElement,
+      };
+      let ready: boolean;
+      try {
+        ready =
+          Boolean(region.linkedTab) &&
+          Boolean(
+            await this.callbacks.requestRegionVisibility?.(region),
+          );
+      } catch {
+        ready = false;
+      }
+      if (this.pendingVisibilityRequest?.id === requestId) {
+        this.pendingVisibilityRequest = null;
+      }
+      if (!this.started || requestId !== this.navigationRequestId) {
+        return false;
+      }
+      const refreshed = this.regions.find(
+        (candidate) =>
+          candidate.type === targetType &&
+          candidate.element === targetElement,
+      );
+      if (!ready || !refreshed || !isVisible(refreshed.element)) {
+        this.callbacks.onAnnounce("关联内容面板未能打开");
+        return false;
+      }
+      region = refreshed;
+      this.ensureRegionTabStop(region.element);
+    }
     this.focusRegion(region, nextIndex, regions.length, true);
     return true;
+  }
+
+  focusWithoutRegionAnnouncement(element: HTMLElement): void {
+    this.suppressedFocusAnnouncement = element;
+    try {
+      element.focus();
+    } finally {
+      this.suppressedFocusAnnouncement = null;
+    }
   }
 
   isRegionContainer(element: HTMLElement): boolean {
@@ -158,6 +221,16 @@ export class RegionNavigationController {
 
   getContainingRegionType(element: HTMLElement): RegionType | null {
     return this.findContainingRegion(element)?.type ?? null;
+  }
+
+  getExplicitRegionType(element: HTMLElement): RegionType | null {
+    const region = this.regions.find(
+      (candidate) =>
+        candidate.element === element &&
+        candidate.element.isConnected &&
+        candidate.source !== "semantic",
+    );
+    return region?.type ?? null;
   }
 
   getCounts(): Record<RegionType, number> {
@@ -176,8 +249,12 @@ export class RegionNavigationController {
       (region) =>
         region.type === type &&
         region.element.isConnected &&
-        isVisible(region.element),
+        (isVisible(region.element) || Boolean(region.linkedTab)),
     );
+  }
+
+  private getVisibleRegions(type: RegionType): ScannedRegion[] {
+    return this.getRegions(type).filter((region) => isVisible(region.element));
   }
 
   private focusRegion(
@@ -233,18 +310,33 @@ export class RegionNavigationController {
     });
   }
 
-  private recoverRemovedRegion(type: RegionType, previousIndex: number): void {
-    const regions = this.getRegions(type);
-    if (regions.length === 0) {
+  private recoverRemovedRegion(
+    type: RegionType,
+    previousIndex: number,
+    previousStillTracked: boolean,
+  ): void {
+    const navigableRegions = this.getRegions(type);
+    if (this.getVisibleRegions(type).length === 0) {
       this.clearActiveRegion();
       this.lastIndexes.set(type, -1);
       this.callbacks.onReturnToCategory(type);
       return;
     }
-    const nextIndex = Math.max(previousIndex, 0) % regions.length;
-    const region = regions[nextIndex];
-    if (region) {
-      this.focusRegion(region, nextIndex, regions.length, false);
+    const startIndex =
+      (Math.max(previousIndex, 0) + (previousStillTracked ? 1 : 0)) %
+      navigableRegions.length;
+    for (let offset = 0; offset < navigableRegions.length; offset += 1) {
+      const navigableIndex = (startIndex + offset) % navigableRegions.length;
+      const region = navigableRegions[navigableIndex];
+      if (region && isVisible(region.element)) {
+        this.focusRegion(
+          region,
+          navigableIndex,
+          navigableRegions.length,
+          false,
+        );
+        return;
+      }
     }
   }
 
@@ -283,6 +375,11 @@ export class RegionNavigationController {
 
     const focusedRegion = this.findContainingRegion(target);
     if (focusedRegion) {
+      if (
+        this.pendingVisibilityRequest?.element === focusedRegion.element
+      ) {
+        return;
+      }
       this.activateFocusedRegion(
         focusedRegion,
         target === focusedRegion.element &&

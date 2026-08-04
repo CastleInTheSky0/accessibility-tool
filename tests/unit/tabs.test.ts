@@ -46,7 +46,7 @@ describe("TabsController", () => {
       onAnnounce: announce,
       onError: vi.fn(),
       getRegionType: (element) =>
-        element.id === "tab-a" ? "content" : "navigation",
+        element.id === "panel-a" ? "content" : "navigation",
     });
     controller.start([document]);
 
@@ -130,24 +130,26 @@ describe("TabsController", () => {
     controller.stop();
   });
 
-  it("uses real scanned region types across DOM, open Shadow Root and iframe roots", () => {
+  it("uses each linked panel's exact explicit type across DOM, Shadow Root and iframe roots", () => {
     document.body.innerHTML = `
-      <section id="dom-region">
-        <section id="dom-inner-region">
+      <section id="dom-outer-region">
+        <section id="dom-tab-region">
           <div role="tablist"><button id="dom-tab" role="tab" aria-controls="dom-panel">普通选项</button></div>
-          <section id="dom-panel" role="tabpanel">普通面板</section>
         </section>
+        <section id="dom-panel" role="tabpanel">普通面板</section>
+        <div role="tablist"><button id="unmarked-tab" role="tab" aria-controls="unmarked-panel">未分类选项</button></div>
+        <section id="unmarked-panel" role="tabpanel">未分类面板</section>
       </section>
-      <section id="shadow-region"><div id="shadow-host"></div></section>
-      <section id="frame-region"><iframe id="frame"></iframe></section>
+      <section id="shadow-outer-region"><div id="shadow-host"></div></section>
+      <section id="frame-outer-region"><iframe id="frame"></iframe></section>
     `;
     const shadowHost = get("shadow-host");
     const shadowRoot = shadowHost.attachShadow({ mode: "open" });
     shadowRoot.innerHTML = `
-      <section id="shadow-inner-region">
+      <section id="shadow-tab-region">
         <div role="tablist"><button id="shadow-tab" role="tab" aria-controls="shadow-panel">影子选项</button></div>
-        <section id="shadow-panel" role="tabpanel">影子面板</section>
       </section>
+      <section id="shadow-panel" role="tabpanel">影子面板</section>
     `;
     const frame = get("frame") as HTMLIFrameElement;
     const frameDocument = frame.contentDocument;
@@ -155,10 +157,10 @@ describe("TabsController", () => {
       throw new Error("Missing iframe document");
     }
     frameDocument.body.innerHTML = `
-      <section id="frame-inner-region">
+      <section id="frame-tab-region">
         <div role="tablist"><button id="frame-tab" role="tab" aria-controls="frame-panel">框架选项</button></div>
-        <section id="frame-panel" role="tabpanel">框架面板</section>
       </section>
+      <section id="frame-panel" role="tabpanel">框架面板</section>
     `;
 
     const effects = {
@@ -176,39 +178,60 @@ describe("TabsController", () => {
     const regions: ScannedRegion[] = [
       {
         type: "navigation",
-        element: get("dom-inner-region"),
-        label: "普通内层区域",
+        element: get("dom-tab-region"),
+        label: "普通选项外层",
         source: "data",
       },
       {
         type: "content",
-        element: get("dom-region"),
+        element: get("dom-outer-region"),
         label: "普通外层区域",
         source: "data",
       },
       {
         type: "content",
-        element: get("shadow-region"),
+        element: get("shadow-outer-region"),
         label: "影子外层区域",
         source: "data",
       },
       {
         type: "service",
-        element: getFromRoot(shadowRoot, "shadow-inner-region"),
-        label: "影子内层区域",
+        element: getFromRoot(shadowRoot, "shadow-tab-region"),
+        label: "影子选项外层",
         source: "data",
       },
       {
-        type: "content",
-        element: get("frame-region"),
+        type: "navigation",
+        element: get("frame-outer-region"),
         label: "框架外层区域",
         source: "data",
       },
       {
         type: "list",
-        element: getFromRoot(frameDocument, "frame-inner-region"),
-        label: "框架内层区域",
+        element: getFromRoot(frameDocument, "frame-tab-region"),
+        label: "框架选项外层",
         source: "data",
+      },
+      {
+        type: "viewport",
+        element: get("dom-panel"),
+        label: "普通面板",
+        source: "data",
+        linkedTab: get("dom-tab"),
+      },
+      {
+        type: "interaction",
+        element: getFromRoot(shadowRoot, "shadow-panel"),
+        label: "影子面板",
+        source: "config",
+        linkedTab: getFromRoot(shadowRoot, "shadow-tab"),
+      },
+      {
+        type: "content",
+        element: getFromRoot(frameDocument, "frame-panel"),
+        label: "框架面板",
+        source: "legacy",
+        linkedTab: getFromRoot(frameDocument, "frame-tab"),
       },
     ];
     const roots = [document, shadowRoot, frameDocument] as const;
@@ -216,22 +239,26 @@ describe("TabsController", () => {
     regionNavigation.update(regions, roots, "initial");
 
     const announce = vi.fn();
+    const countsBeforeTabsStart = regionNavigation.getCounts();
     const tabs = new TabsController(mergeConfig(DEFAULT_CONFIG), {
       onAnnounce: announce,
       onError: vi.fn(),
       getRegionType: (element) =>
-        regionNavigation.getContainingRegionType(element),
+        regionNavigation.getExplicitRegionType(element),
     });
     tabs.start(roots);
+    expect(regionNavigation.getCounts()).toEqual(countsBeforeTabsStart);
 
     get("dom-tab").focus();
     getFromRoot(shadowRoot, "shadow-tab").focus();
     getFromRoot(frameDocument, "frame-tab").focus();
+    get("unmarked-tab").focus();
 
     expect(announce.mock.calls).toEqual([
-      ["Tab，普通选项，导航区，当前有浮动窗口，按 ALT+下键进入窗口"],
-      ["Tab，影子选项，服务区，当前有浮动窗口，按 ALT+下键进入窗口"],
-      ["Tab，框架选项，列表区，当前有浮动窗口，按 ALT+下键进入窗口"],
+      ["Tab，普通选项，视窗区，当前有浮动窗口，按 ALT+下键进入窗口"],
+      ["Tab，影子选项，交互区，当前有浮动窗口，按 ALT+下键进入窗口"],
+      ["Tab，框架选项，正文区，当前有浮动窗口，按 ALT+下键进入窗口"],
+      ["Tab，未分类选项，当前有浮动窗口，按 ALT+下键进入窗口"],
     ]);
     tabs.stop();
     regionNavigation.stop();
@@ -293,6 +320,182 @@ describe("TabsController", () => {
     controller.stop();
     expect(tabA.hasAttribute("tabindex")).toBe(false);
     expect(tabB.hasAttribute("tabindex")).toBe(false);
+  });
+
+  it("shares hidden-panel activation and waits for the host event", async () => {
+    document.body.innerHTML = `
+      <style>[role="tabpanel"][data-a11y-hidden] { display: none; }</style>
+      <div role="tablist">
+        <button id="tab-a" role="tab" aria-controls="panel-a" aria-selected="true">A</button>
+        <button id="tab-b" role="tab" aria-controls="panel-b" aria-selected="false" data-a11y-trigger-event="host-open">B</button>
+      </div>
+      <section id="panel-a" role="tabpanel">A panel</section>
+      <section id="panel-b" role="tabpanel" data-a11y-hidden>B panel</section>
+    `;
+    const tabB = get("tab-b");
+    const panelB = get("panel-b");
+    const hostOpen = vi.fn(() => {
+      window.setTimeout(() => {
+        panelB.removeAttribute("data-a11y-hidden");
+      }, 10);
+    });
+    tabB.addEventListener("host-open", hostOpen);
+    const controller = new TabsController(
+      mergeConfig(DEFAULT_CONFIG, { tabs: { panelReadyTimeoutMs: 100 } }),
+      { onAnnounce: vi.fn(), onError: vi.fn(), getRegionType: () => null },
+    );
+    controller.start([document]);
+
+    const first = controller.requestPanelVisibility(panelB);
+    const second = controller.requestPanelVisibility(panelB);
+    expect(second).toBe(first);
+    await expect(first).resolves.toBe(true);
+
+    expect(hostOpen).toHaveBeenCalledTimes(1);
+    expect(tabB.getAttribute("aria-selected")).toBe("true");
+    expect(panelB.getAttribute("aria-hidden")).toBe("false");
+    expect(panelB.hasAttribute("data-a11y-hidden")).toBe(false);
+    expect(panelB.hasAttribute("hidden")).toBe(false);
+    controller.stop();
+  });
+
+  it("reports hidden-panel readiness as false when the host never shows it", async () => {
+    document.body.innerHTML = `
+      <style>[data-a11y-hidden] { display: none; }</style>
+      <div role="tablist"><button id="tab" role="tab" aria-controls="panel" data-a11y-trigger-event="host-open">选项</button></div>
+      <section id="panel" role="tabpanel" data-a11y-hidden>面板</section>
+    `;
+    const hostOpen = vi.fn();
+    get("tab").addEventListener("host-open", hostOpen);
+    const controller = new TabsController(
+      mergeConfig(DEFAULT_CONFIG, { tabs: { panelReadyTimeoutMs: 10 } }),
+      { onAnnounce: vi.fn(), onError: vi.fn(), getRegionType: () => null },
+    );
+    controller.start([document]);
+
+    await expect(controller.requestPanelVisibility(get("panel"))).resolves.toBe(
+      false,
+    );
+    expect(hostOpen).toHaveBeenCalledTimes(1);
+    expect(get("panel").hasAttribute("data-a11y-hidden")).toBe(true);
+    controller.stop();
+  });
+
+  it("uses the panel's own region for Alt+Down and suppresses its generic entry", async () => {
+    document.body.innerHTML = `
+      <section id="outer-region">
+        <div role="tablist">
+          <button id="tab-a" role="tab" aria-controls="panel-a" aria-selected="true">概览</button>
+        </div>
+        <section id="panel-a" role="tabpanel"><a href="#details">详情</a></section>
+      </section>
+      <button id="outside">外部</button>
+    `;
+    const panel = get("panel-a");
+    const regionAnnounce = vi.fn();
+    const regionNavigation = new RegionNavigationController(createEffects(), {
+      getToolbarOffset: () => 102,
+      onCountsChange: vi.fn(),
+      onAnnounce: regionAnnounce,
+      onRegionChange: vi.fn(),
+      onReturnToCategory: vi.fn(),
+      onDynamicUpdate: vi.fn(),
+    });
+    regionNavigation.start();
+    regionNavigation.update(
+      [
+        {
+          type: "service",
+          element: get("outer-region"),
+          label: "外层",
+          source: "data",
+        },
+        {
+          type: "viewport",
+          element: panel,
+          label: "概览",
+          source: "data",
+          linkedTab: get("tab-a"),
+        },
+      ],
+      [document],
+      "initial",
+    );
+    const panelAnnounce = vi.fn();
+    const controller = new TabsController(mergeConfig(DEFAULT_CONFIG), {
+      onAnnounce: panelAnnounce,
+      onError: vi.fn(),
+      getRegionType: (element) =>
+        regionNavigation.getExplicitRegionType(element),
+      focusPanelWithoutRegionAnnouncement: (element) =>
+        regionNavigation.focusWithoutRegionAnnouncement(element),
+    });
+    controller.start([document]);
+
+    const tab = get("tab-a");
+    tab.focus();
+    panelAnnounce.mockClear();
+    regionAnnounce.mockClear();
+    tab.dispatchEvent(key("ArrowDown", { altKey: true }));
+    await frame();
+
+    expect(document.activeElement).toBe(panel);
+    expect(regionAnnounce).not.toHaveBeenCalled();
+    expect(panelAnnounce).toHaveBeenCalledTimes(1);
+    expect(panelAnnounce).toHaveBeenCalledWith(
+      "您已进入概览视窗区标签面板，按 Tab 键遍历信息，按 Esc 键退出面板并返回概览选项",
+    );
+
+    get("outside").focus();
+    panel.focus();
+    expect(regionAnnounce).toHaveBeenCalledWith(
+      "提示：您已进入概览视窗区，按下 Tab 键浏览信息；第 1 个，共 1 个",
+    );
+    controller.stop();
+    regionNavigation.stop();
+  });
+
+  it("activates hidden panels in open shadow roots and same-origin iframes", async () => {
+    document.body.innerHTML = `<div id="host"></div><iframe id="frame"></iframe>`;
+    const shadowRoot = get("host").attachShadow({ mode: "open" });
+    shadowRoot.innerHTML = `
+      <style>[data-a11y-hidden] { display: none; }</style>
+      <div role="tablist"><button id="shadow-tab" role="tab" aria-controls="shadow-panel" data-a11y-trigger-event="open-shadow">影子</button></div>
+      <section id="shadow-panel" role="tabpanel" data-a11y-hidden>影子面板</section>
+    `;
+    const frameDocument = (get("frame") as HTMLIFrameElement).contentDocument;
+    if (!frameDocument) {
+      throw new Error("Missing iframe document");
+    }
+    frameDocument.body.innerHTML = `
+      <style>[data-a11y-hidden] { display: none; }</style>
+      <div role="tablist"><button id="frame-tab" role="tab" aria-controls="frame-panel" data-a11y-trigger-event="open-frame">框架</button></div>
+      <section id="frame-panel" role="tabpanel" data-a11y-hidden>框架面板</section>
+    `;
+    const shadowPanel = getFromRoot(shadowRoot, "shadow-panel");
+    const framePanel = getFromRoot(frameDocument, "frame-panel");
+    getFromRoot(shadowRoot, "shadow-tab").addEventListener("open-shadow", () => {
+      shadowPanel.removeAttribute("data-a11y-hidden");
+    });
+    getFromRoot(frameDocument, "frame-tab").addEventListener("open-frame", () => {
+      framePanel.removeAttribute("data-a11y-hidden");
+    });
+    const controller = new TabsController(mergeConfig(DEFAULT_CONFIG), {
+      onAnnounce: vi.fn(),
+      onError: vi.fn(),
+      getRegionType: () => null,
+    });
+    controller.start([document, shadowRoot, frameDocument]);
+
+    await expect(controller.requestPanelVisibility(shadowPanel)).resolves.toBe(
+      true,
+    );
+    await expect(controller.requestPanelVisibility(framePanel)).resolves.toBe(
+      true,
+    );
+    expect(shadowPanel.hasAttribute("data-a11y-hidden")).toBe(false);
+    expect(framePanel.hasAttribute("data-a11y-hidden")).toBe(false);
+    controller.stop();
   });
 
   it("keeps every option in Tab order and auto-activates keyboard Tab focus", async () => {
@@ -719,6 +922,13 @@ function getFromRoot(root: ParentNode, id: string): HTMLElement {
     throw new Error(`Missing #${id}`);
   }
   return element as HTMLElement;
+}
+
+function createEffects() {
+  return {
+    setRegionHighlight: vi.fn<(element: HTMLElement | null) => void>(),
+    clearRegionHighlight: vi.fn<(element?: HTMLElement) => void>(),
+  };
 }
 
 function key(

@@ -23,6 +23,8 @@ interface TabsCallbacks {
   onAnnounce: (message: string) => void;
   onError: (error: unknown, message: string) => void;
   getRegionType: (element: HTMLElement) => RegionType | null;
+  focusPanelWithoutRegionAnnouncement?: (panel: HTMLElement) => void;
+  onPanelVisibilityChange?: () => void;
 }
 
 export class TabsController {
@@ -33,6 +35,10 @@ export class TabsController {
   private readonly handledKeydownEvents = new WeakSet<Event>();
   private readonly pendingPanelEntries = new Set<HTMLElement>();
   private readonly pendingPanelLeaves = new Set<HTMLElement>();
+  private readonly pendingPanelActivations = new Map<
+    HTMLElement,
+    Promise<boolean>
+  >();
   private readonly suppressedTabFocusAnnouncements = new Set<HTMLElement>();
   private roots: readonly (Document | ShadowRoot)[] = [];
   private running = false;
@@ -40,6 +46,7 @@ export class TabsController {
   private tabNavigationTimer: number | null = null;
   private activeDialog: HTMLElement | null = null;
   private dialogOrigin: HTMLElement | null = null;
+  private lifecycleGeneration = 0;
 
   constructor(
     private config: ResolvedAccessibilityToolConfig,
@@ -57,6 +64,7 @@ export class TabsController {
     if (!this.config.tabs.enabled) {
       return;
     }
+    this.lifecycleGeneration += 1;
     this.running = true;
     this.setRoots(roots);
     this.refresh();
@@ -64,6 +72,7 @@ export class TabsController {
 
   stop(): void {
     this.running = false;
+    this.lifecycleGeneration += 1;
     this.detachRoots();
     this.groups.clear();
     this.setTabNavigationPending(false);
@@ -71,6 +80,7 @@ export class TabsController {
     this.dialogOrigin = null;
     this.pendingPanelEntries.clear();
     this.pendingPanelLeaves.clear();
+    this.pendingPanelActivations.clear();
     this.suppressedTabFocusAnnouncements.clear();
     this.modalLedger.restore();
     this.ledger.restore();
@@ -202,12 +212,47 @@ export class TabsController {
     for (const panel of [
       ...this.pendingPanelEntries,
       ...this.pendingPanelLeaves,
+      ...this.pendingPanelActivations.keys(),
     ]) {
       if (isComposedDescendant(panel, element)) {
         return true;
       }
     }
     return false;
+  }
+
+  requestPanelVisibility(panel: HTMLElement): Promise<boolean> {
+    if (!this.running || !panel.isConnected) {
+      return Promise.resolve(false);
+    }
+    if (isVisible(panel)) {
+      return Promise.resolve(true);
+    }
+    const pending = this.pendingPanelActivations.get(panel);
+    if (pending) {
+      return pending;
+    }
+    const entry = this.findPanelEntry(panel);
+    if (!entry) {
+      return Promise.resolve(false);
+    }
+    const generation = this.lifecycleGeneration;
+    const operation = Promise.resolve()
+      .then(() =>
+        this.activatePanelAndWait(
+          entry.group,
+          entry.tab,
+          panel,
+          generation,
+        ),
+      )
+      .finally(() => {
+        if (this.pendingPanelActivations.get(panel) === operation) {
+          this.pendingPanelActivations.delete(panel);
+        }
+      });
+    this.pendingPanelActivations.set(panel, operation);
+    return operation;
   }
 
   private attachRoots(): void {
@@ -244,6 +289,10 @@ export class TabsController {
     requestAnimationFrame(() => {
       if (tab.isConnected) {
         this.syncSelection(group, tab);
+        const panel = group.panels.get(tab);
+        if (panel && isVisible(panel)) {
+          this.callbacks.onPanelVisibilityChange?.();
+        }
       }
     });
   };
@@ -262,10 +311,11 @@ export class TabsController {
     }
     const group = this.findGroup(tab);
     if (group && !this.suppressedTabFocusAnnouncements.has(tab)) {
+      const panel = group.panels.get(tab);
       this.callbacks.onAnnounce(
         formatTabFocusAnnouncement(
           getTabName(tab),
-          this.callbacks.getRegionType(tab),
+          panel ? this.callbacks.getRegionType(panel) : null,
           isLinkTab(tab),
         ),
       );
@@ -376,9 +426,14 @@ export class TabsController {
       this.dispatchOriginalEvent(tab, eventName);
     }
 
+    this.syncSelection(group, tab);
+    const panel = group.panels.get(tab);
+    if (panel && isVisible(panel)) {
+      this.callbacks.onPanelVisibilityChange?.();
+    }
+
     requestAnimationFrame(() => {
       this.syncSelection(group, tab);
-      const panel = group.panels.get(tab);
       if (panel && !isVisible(panel)) {
         this.markDiagnostic(group.list, "原页面事件未显示关联面板");
         this.report(
@@ -387,6 +442,31 @@ export class TabsController {
         );
       }
     });
+  }
+
+  private async activatePanelAndWait(
+    group: TabGroup,
+    tab: HTMLElement,
+    panel: HTMLElement,
+    generation: number,
+  ): Promise<boolean> {
+    const events = this.resolveTriggerEvents(tab);
+    for (const eventName of events) {
+      this.dispatchOriginalEvent(tab, eventName);
+    }
+    if (!this.running || generation !== this.lifecycleGeneration) {
+      return false;
+    }
+    this.syncSelection(group, tab);
+    const ready = await waitUntilVisible(
+      panel,
+      this.config.tabs.panelReadyTimeoutMs,
+      () => this.running && generation === this.lifecycleGeneration,
+    );
+    if (ready) {
+      this.callbacks.onPanelVisibilityChange?.();
+    }
+    return ready;
   }
 
   private resolveActivation(tab: HTMLElement): TabActivationMode {
@@ -467,13 +547,9 @@ export class TabsController {
     }
     this.pendingPanelEntries.add(panel);
     try {
-      if (!isVisible(panel)) {
-        this.activateTab(group, tab);
-      }
-      const ready = await waitUntilVisible(
-        panel,
-        this.config.tabs.panelReadyTimeoutMs,
-      );
+      const ready = isVisible(panel)
+        ? true
+        : await this.requestPanelVisibility(panel);
       if (!ready) {
         this.callbacks.onAnnounce("关联内容面板未能打开");
         this.report(
@@ -486,7 +562,11 @@ export class TabsController {
         this.setAttribute(panel, "tabindex", "-1");
       }
       const hasTabbableContent = getFocusableElements(panel).length > 0;
-      panel.focus();
+      if (this.callbacks.focusPanelWithoutRegionAnnouncement) {
+        this.callbacks.focusPanelWithoutRegionAnnouncement(panel);
+      } else {
+        panel.focus();
+      }
       if (!isElementFocused(panel)) {
         return;
       }
@@ -498,7 +578,7 @@ export class TabsController {
       this.callbacks.onAnnounce(
         formatPanelEntryAnnouncement(
           getTabName(tab),
-          this.callbacks.getRegionType(tab),
+          this.callbacks.getRegionType(panel),
           hasTabbableContent,
         ),
       );
@@ -646,6 +726,19 @@ export class TabsController {
     return list ? this.groups.get(list) ?? null : null;
   }
 
+  private findPanelEntry(
+    panel: HTMLElement,
+  ): { group: TabGroup; tab: HTMLElement } | null {
+    for (const group of this.groups.values()) {
+      for (const [tab, candidate] of group.panels) {
+        if (candidate === panel) {
+          return { group, tab };
+        }
+      }
+    }
+    return null;
+  }
+
   private findPanelForEvent(
     event: Event,
   ): { panel: HTMLElement; tab: HTMLElement } | null {
@@ -785,13 +878,18 @@ function getPathElement(event: Event, selector: string): HTMLElement | null {
 async function waitUntilVisible(
   element: HTMLElement,
   timeoutMs: number,
+  isActive: () => boolean = () => true,
 ): Promise<boolean> {
-  if (isVisible(element)) {
+  if (isActive() && isVisible(element)) {
     return true;
   }
   const started = performance.now();
   return new Promise((resolve) => {
     const poll = (): void => {
+      if (!isActive()) {
+        resolve(false);
+        return;
+      }
       if (isVisible(element)) {
         resolve(true);
         return;

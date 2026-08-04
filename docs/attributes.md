@@ -18,7 +18,7 @@
 <main data-a11y-region="6" data-a11y-label="办事正文"></main>
 ```
 
-允许同类多个区域和区域嵌套。所有可见区域按页面结构顺序参与导航。
+允许同类多个区域和区域嵌套。区域按页面结构顺序参与导航；普通隐藏区域会排除，只有显式标记且能通过同一根节点内标准选项关系激活的隐藏 `tabpanel` 会保留在分类顺序中。
 
 ## 识别优先级
 
@@ -35,8 +35,9 @@
 2. 旧站兼容属性 `aria-readlabel`
 3. `aria-label`
 4. `aria-labelledby`
-5. 区域内第一个可见标题
-6. 默认分类名称
+5. 关联 `role="tab"` 的可访问名称（显式面板区域）
+6. 区域内第一个可见标题
+7. 默认分类名称
 
 ## 区域名称与导航播报
 
@@ -77,7 +78,7 @@ AccessibilityTool.configure({
 
 ## 排除内容
 
-`hidden`、`display:none`、`visibility:hidden`、`aria-hidden="true"`、`inert` 或位于未显示面板内的区域不计数。使用 `data-a11y-ignore` 可排除整个子树：
+`hidden`、`display:none`、`visibility:hidden`、`aria-hidden="true"`、`inert` 或位于未显示面板内的普通区域不计数。例外是接入方显式添加合法区域分类、并能通过同一 `Document` 或 open Shadow Root 中 `role="tab"` + `aria-controls` 标准关系找到来源选项的隐藏 `role="tabpanel"`：这类面板保留在分类计数和 DOM 顺序中，但显示前不会进入普通 Tab 顺序。使用 `data-a11y-ignore` 仍会排除整个子树：
 
 ```html
 <section data-a11y-ignore>不会扫描或朗读</section>
@@ -106,10 +107,16 @@ AccessibilityTool.configure({
     data-a11y-trigger-event="mouseover click"
   >选项二</button>
 </div>
-<section id="panel-1" role="tabpanel" aria-labelledby="tab-1"></section>
+<section
+  id="panel-1"
+  role="tabpanel"
+  data-a11y-region="viewport"
+  aria-labelledby="tab-1"
+></section>
 <section
   id="panel-2"
   role="tabpanel"
+  data-a11y-region="viewport"
   aria-labelledby="tab-2"
   data-a11y-hidden
 ></section>
@@ -125,14 +132,17 @@ AccessibilityTool.configure({
 
 `data-a11y-activation` 与 `data-a11y-trigger-event` 只从各自的 `role="tab"` 选项节点读取，`role="tablist"` 仅用于标准分组和 `aria-orientation` 方向语义。
 
+- 面板区域分类必须由接入方显式添加；工具不会因为存在 `role="tabpanel"` 就自动推测分类，`regions.autoDetect: false` 也不会关闭显式分类。
+- 面板未提供 `data-a11y-label` 时，工具通过 `aria-labelledby` / `aria-controls` 关系使用来源选项名称；面板自己的显式名称仍有更高优先级。
 - 激活模式未声明或不是 `automatic` / `manual` 时，回退到 `tabs.defaultActivation`。
 - 触发事件未声明或为空时，回退到 `tabs.triggerEvents`；配置仍为空时最终使用 `click`。
 - 多个事件使用空格分隔并自动去重，因此不同选项可以分别触发不同的页面原有事件。
 - 页面原有事件负责在普通 `role="tabpanel"` 或非原生浮层上添加、移除布尔属性 `data-a11y-hidden`，不要在这些宿主面板上直接使用原生 `hidden`。
 - 工具只触发页面原事件并同步 `aria-selected` / `aria-hidden`，不直接写入 `data-a11y-hidden` 或控制业务视觉样式；`aria-hidden` 不能替代显隐属性，`data-a11y-hidden` 也不能替代无障碍状态。
 - 原生 `<dialog>` 不使用 `data-a11y-hidden`，继续由页面通过 `showModal()`、`open` 和 `close()` 控制。
-- 每个有效 `role="tab"` 获得焦点时只朗读一次完整提示：普通选项为 `Tab，{名称}，{区域分类}，当前有浮动窗口，按 ALT+下键进入窗口`，带 `href` 的 `<a role="tab">` 为 `链接：{名称}，Tab，{区域分类}，当前有浮动窗口，按 ALT+下键进入窗口`。区域分类只取扫描结果中的六类名称；无所属区域时省略该片段。
-- Alt+下进入关联面板时朗读来源选项、区域分类、Tab 遍历和 Esc 返回方法；面板没有可通过 Tab 聚焦的后代时改为提示“当前面板暂无可通过 Tab 遍历的信息”，不会给静态内容增加 `tabindex`。
+- 每个有效 `role="tab"` 获得焦点时只朗读一次完整提示：普通选项为 `Tab，{名称}，{区域分类}，当前有浮动窗口，按 ALT+下键进入窗口`，带 `href` 的 `<a role="tab">` 为 `链接：{名称}，Tab，{区域分类}，当前有浮动窗口，按 ALT+下键进入窗口`。区域分类只取关联面板自身扫描到的显式六类分类，不回退到选项或面板的外层区域；关联面板未显式分类时省略该片段。不要在选项上重复添加区域属性，选项不会作为独立盲道区域计数。
+- 显式标记的隐藏面板仍参与区域数量和分类循环；分类快捷键或工具栏按钮命中时，工具复用来源选项的触发事件，等待页面显示成功后才添加可逆区域 Tab 锚点、聚焦并朗读。超时、停止或较新的导航使请求过期时，不切换当前区域，也不朗读成功提示。
+- Alt+下进入关联面板时使用面板自身的显式区域分类，朗读来源选项、Tab 遍历和 Esc 返回方法；该次聚焦抑制通用区域进入播报，因此只朗读一次。面板没有可通过 Tab 聚焦的后代时改为提示“当前面板暂无可通过 Tab 遍历的信息”，不会给静态内容增加 `tabindex`。
 - Esc 只有在面板成功退出并将焦点返回来源选项后才朗读 `已返回{名称}选项`；返回失败时不朗读成功提示。
 
 ## 对话框关闭钩子

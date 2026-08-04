@@ -488,6 +488,9 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
         this.state.isPinned && this.state.isCollapsed
           ? 12
           : this.ui?.getToolbarHeight() ?? 102,
+      requestRegionVisibility: (region) =>
+        this.tabs?.requestPanelVisibility(region.element) ??
+        Promise.resolve(false),
       onCountsChange: (counts) => this.ui?.setRegionCounts(counts),
       onAnnounce: (message) => {
         this.reading?.cancel();
@@ -508,7 +511,10 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
       },
       onError: (error, message) => this.reportError(error, message),
       getRegionType: (element) =>
-        this.regionNavigation?.getContainingRegionType(element) ?? null,
+        this.regionNavigation?.getExplicitRegionType(element) ?? null,
+      focusPanelWithoutRegionAnnouncement: (panel) =>
+        this.regionNavigation?.focusWithoutRegionAnnouncement(panel),
+      onPanelVisibilityChange: () => this.scanner?.refresh(),
     });
     this.scanner = new RegionScanner(this.activeConfig, {
       onUpdate: (regions, roots, reason) => {
@@ -612,7 +618,7 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
   ): Promise<void> {
     if (action.startsWith("region:")) {
       const type = action.slice("region:".length) as RegionType;
-      this.regionNavigation?.navigate(type);
+      await this.regionNavigation?.navigate(type);
       return;
     }
 
@@ -973,7 +979,7 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
       return;
     }
     event.preventDefault();
-    this.regionNavigation?.navigate(type);
+    void this.regionNavigation?.navigate(type);
   };
 }
 

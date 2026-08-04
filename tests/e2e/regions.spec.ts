@@ -11,7 +11,7 @@ test("shows six live counts and navigates each category in DOM order", async ({
 }) => {
   const host = page.locator("[data-a11y-tool-host]");
   await expect(
-    host.getByRole("button", { name: "视窗区，共 2 个" }),
+    host.getByRole("button", { name: "视窗区，共 9 个" }),
   ).toBeVisible();
   await expect(
     host.getByRole("button", { name: "导航区，共 4 个" }),
@@ -44,6 +44,44 @@ test("shows six live counts and navigates each category in DOM order", async ({
   await expect(firstRegion).not.toHaveAttribute(
     "data-a11y-page-focus-owned",
     "",
+  );
+});
+
+test("keeps hidden tab panels in viewport order and opens them on demand", async ({
+  page,
+}) => {
+  const host = page.locator("[data-a11y-tool-host]");
+  const viewport = host.getByRole("button", { name: "视窗区，共 9 个" });
+  const liveRegion = host.getByRole("status");
+  const overviewPanel = page.locator("#panel-overview");
+  const protocolPanel = page.locator("#panel-protocol");
+  const keyboardPanel = page.locator("#panel-keyboard");
+
+  await expect(protocolPanel).toHaveAttribute("data-a11y-hidden", "");
+  await expect(protocolPanel).not.toHaveAttribute("tabindex", /.+/);
+
+  await viewport.click();
+  await viewport.click();
+  await viewport.click();
+  await viewport.click();
+
+  await expect(protocolPanel).toBeFocused();
+  await expect(protocolPanel).not.toHaveAttribute("data-a11y-hidden", "");
+  await expect(protocolPanel).toHaveAttribute("tabindex", "0");
+  await expect(overviewPanel).toHaveAttribute("data-a11y-hidden", "");
+  await expect(viewport).toHaveAttribute("aria-label", "视窗区，共 9 个");
+  await expect(liveRegion).toHaveText(
+    "提示：您已进入属性协议视窗区，按下 Tab 键浏览信息；第 4 个，共 9 个",
+  );
+
+  await page.keyboard.press("Alt+Shift+Digit1");
+  await expect(keyboardPanel).toBeFocused();
+  await expect(keyboardPanel).not.toHaveAttribute("data-a11y-hidden", "");
+  await expect(protocolPanel).toHaveAttribute("data-a11y-hidden", "");
+  await expect(protocolPanel).not.toHaveAttribute("tabindex", /.+/);
+  await expect(viewport).toHaveAttribute("aria-label", "视窗区，共 9 个");
+  await expect(liveRegion).toHaveText(
+    "提示：您已进入键盘模型视窗区，按下 Tab 键浏览信息；第 5 个，共 9 个",
   );
 });
 

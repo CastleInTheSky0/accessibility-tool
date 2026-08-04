@@ -7,6 +7,7 @@ import {
 import type { ResolvedAccessibilityToolConfig } from "../core/config";
 import { DomLedger } from "../core/dom-ledger";
 import {
+  getAccessibleName,
   isHTMLElement,
   isVisible,
   normalizeText,
@@ -21,6 +22,7 @@ export interface ScannedRegion {
   element: HTMLElement;
   label: string;
   source: RegionSource;
+  linkedTab?: HTMLElement;
 }
 
 export type RegionScanReason = "initial" | "mutation" | "route" | "manual";
@@ -199,22 +201,21 @@ export class RegionScanner {
   private classify(element: HTMLElement): ScannedRegion | null {
     if (
       element.closest(`[${TOOL_HOST_ATTRIBUTE}]`) ||
-      this.shouldIgnore(element) ||
-      !isVisible(element)
+      this.shouldIgnore(element)
     ) {
       return null;
     }
 
     const configured = this.matchConfiguredType(element);
     if (configured) {
-      return this.createRegion(configured, element, "config");
+      return this.createExplicitRegion(configured, element, "config");
     }
 
     const dataValue = element.getAttribute("data-a11y-region");
     if (dataValue !== null) {
       const type = REGION_ALIASES[dataValue.trim().toLowerCase()];
       if (type) {
-        return this.createRegion(type, element, "data");
+        return this.createExplicitRegion(type, element, "data");
       }
       this.reportOnce(
         `data-region:${dataValue}`,
@@ -227,7 +228,7 @@ export class RegionScanner {
     if (legacyValue !== null) {
       const type = REGION_ALIASES[legacyValue.trim().toLowerCase()];
       if (type) {
-        return this.createRegion(type, element, "legacy");
+        return this.createExplicitRegion(type, element, "legacy");
       }
       this.reportOnce(
         `legacy-region:${legacyValue}`,
@@ -236,7 +237,7 @@ export class RegionScanner {
       );
     }
 
-    if (this.config.regions.autoDetect) {
+    if (this.config.regions.autoDetect && isVisible(element)) {
       for (const type of REGION_TYPES) {
         const selector = SEMANTIC_SELECTORS[type];
         if (selector && this.matchesSafe(element, selector)) {
@@ -245,6 +246,18 @@ export class RegionScanner {
       }
     }
     return null;
+  }
+
+  private createExplicitRegion(
+    type: RegionType,
+    element: HTMLElement,
+    source: Exclude<RegionSource, "semantic">,
+  ): ScannedRegion | null {
+    const linkedTab = this.findLinkedTab(element);
+    if (!isVisible(element) && !linkedTab) {
+      return null;
+    }
+    return this.createRegion(type, element, source, linkedTab);
   }
 
   private matchConfiguredType(element: HTMLElement): RegionType | null {
@@ -264,16 +277,22 @@ export class RegionScanner {
     type: RegionType,
     element: HTMLElement,
     source: RegionSource,
+    linkedTab?: HTMLElement,
   ): ScannedRegion {
     return {
       type,
       element,
       source,
-      label: this.resolveLabel(element, type),
+      label: this.resolveLabel(element, type, linkedTab),
+      ...(linkedTab ? { linkedTab } : {}),
     };
   }
 
-  private resolveLabel(element: HTMLElement, type: RegionType): string {
+  private resolveLabel(
+    element: HTMLElement,
+    type: RegionType,
+    linkedTab?: HTMLElement,
+  ): string {
     const explicit =
       element.getAttribute("data-a11y-label") ??
       element.getAttribute("aria-readlabel") ??
@@ -294,6 +313,13 @@ export class RegionScanner {
       }
     }
 
+    if (linkedTab) {
+      const tabName = getAccessibleName(linkedTab, { readingFallbacks: false });
+      if (tabName) {
+        return tabName;
+      }
+    }
+
     const heading = querySelectorAllSafe<HTMLElement>(
       element,
       "h1, h2, h3, h4, h5, h6",
@@ -302,6 +328,28 @@ export class RegionScanner {
       return normalizeText(heading.textContent);
     }
     return REGION_LABELS[type];
+  }
+
+  private findLinkedTab(element: HTMLElement): HTMLElement | undefined {
+    if (element.getAttribute("role") !== "tabpanel" || !element.id) {
+      return undefined;
+    }
+    const root = element.getRootNode();
+    if (!isDocument(root) && !isShadowRoot(root)) {
+      return undefined;
+    }
+    if (findElementsById(root, element.id).length !== 1) {
+      return undefined;
+    }
+    const tabs = querySelectorAllSafe<HTMLElement>(
+      root,
+      '[role="tab"][aria-controls]',
+    ).filter(
+      (tab) =>
+        tab.getAttribute("aria-controls")?.trim() === element.id &&
+        Boolean(tab.closest('[role="tablist"]')),
+    );
+    return tabs.length === 1 ? tabs[0] : undefined;
   }
 
   private shouldIgnore(element: HTMLElement): boolean {
@@ -374,10 +422,13 @@ export class RegionScanner {
             "aria-disabled",
             "aria-label",
             "aria-labelledby",
+            "aria-controls",
             "aria-role",
             "aria-readlabel",
+            "id",
             "data-a11y-region",
             "data-a11y-label",
+            "data-a11y-hidden",
             "data-a11y-ignore",
           ],
         });
@@ -558,6 +609,15 @@ function getElementById(root: Node, id: string): HTMLElement | null {
     return (root as Document | ShadowRoot).getElementById(id);
   }
   return root.ownerDocument?.getElementById(id) ?? null;
+}
+
+function findElementsById(
+  root: Document | ShadowRoot,
+  id: string,
+): HTMLElement[] {
+  return querySelectorAllSafe<HTMLElement>(root, "[id]").filter(
+    (element) => element.id === id,
+  );
 }
 
 function dedupe<T>(values: readonly T[]): T[] {
