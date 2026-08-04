@@ -197,6 +197,31 @@ $overlay-z: 2147483645;
   }
 }
 
+.a11y-control[data-action="colorScheme"] {
+  --a11y-icon-palette-background: #f5f5f3;
+  --a11y-icon-palette-foreground: #191b1d;
+
+  &[data-icon-state="scheme-white-black"] {
+    --a11y-icon-palette-background: #fff;
+    --a11y-icon-palette-foreground: #000;
+  }
+
+  &[data-icon-state="scheme-black-yellow"] {
+    --a11y-icon-palette-background: #000;
+    --a11y-icon-palette-foreground: #ffea00;
+  }
+
+  &[data-icon-state="scheme-yellow-black"] {
+    --a11y-icon-palette-background: #ffe600;
+    --a11y-icon-palette-foreground: #000;
+  }
+
+  &[data-icon-state="scheme-blue-white"] {
+    --a11y-icon-palette-background: #064b9b;
+    --a11y-icon-palette-foreground: #fff;
+  }
+}
+
 .a11y-control__icon {
   align-items: center;
   display: flex;
@@ -213,6 +238,24 @@ $overlay-z: 2147483645;
     stroke-linejoin: round;
     stroke-width: 1.8;
     width: 27px;
+  }
+
+  .a11y-icon__muted {
+    opacity: 0.38;
+  }
+
+  .a11y-icon__palette-background,
+  .a11y-icon__palette-foreground {
+    fill: currentColor;
+    stroke: none;
+  }
+
+  .a11y-icon__palette-background {
+    color: var(--a11y-icon-palette-background);
+  }
+
+  .a11y-icon__palette-foreground {
+    color: var(--a11y-icon-palette-foreground);
   }
 }
 
@@ -363,8 +406,10 @@ $overlay-z: 2147483645;
 }
 
 .a11y-crosshair {
-  background: rgb(255 122 0 / 72%);
-  box-shadow: 0 0 0 1px rgb(0 0 0 / 45%);
+  background: var(--a11y-danger);
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 82%),
+    0 0 0 2px rgb(0 0 0 / 58%);
 }
 
 .a11y-crosshair--x {

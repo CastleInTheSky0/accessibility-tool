@@ -8,6 +8,7 @@ import type { ResolvedAccessibilityToolConfig } from "../core/config";
 import { isHTMLElement } from "../core/dom";
 import type {
   AccessibilityToolState,
+  ColorScheme,
   FeatureId,
   RegionType,
 } from "../types";
@@ -37,47 +38,100 @@ const FEATURE_LABELS: Readonly<Record<FeatureId, string>> = {
   exit: "退出",
 };
 
+const TOGGLE_ICONS = {
+  sound: {
+    off: createSvgIcon(
+      '<path d="M4 9v6h4l5 4V5L8 9H4"/><path d="m16 9 5 6M21 9l-5 6"/>',
+    ),
+    on: createSvgIcon(
+      '<path d="M4 9v6h4l5 4V5L8 9H4"/><path d="M16.2 8.2a5.5 5.5 0 0 1 0 7.6M18.8 5.6a9 9 0 0 1 0 12.8"/>',
+    ),
+  },
+  cursor: {
+    off: createSvgIcon(
+      '<path d="m5 3 13 10-7 1-3 6L5 3Z"/><path d="m13 15 4 5M16 4l5 5M21 4l-5 5"/>',
+    ),
+    on: createSvgIcon(
+      '<path d="m5 3 13 10-7 1-3 6L5 3Z"/><path d="m13 15 4 5M18 3v3M21 6h-3"/>',
+    ),
+  },
+  crosshair: {
+    off: createSvgIcon(
+      '<circle cx="12" cy="12" r="7"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5M4 4l16 16"/>',
+    ),
+    on: createSvgIcon(
+      '<circle cx="12" cy="12" r="7"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/><circle cx="12" cy="12" r="1"/>',
+    ),
+  },
+  fullscreen: {
+    off: createSvgIcon(
+      '<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/>',
+    ),
+    on: createSvgIcon(
+      '<path d="M9 4v5H4M15 4v5h5M20 15h-5v5M4 15h5v5"/>',
+    ),
+  },
+  pin: {
+    off: createSvgIcon(
+      '<path d="M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6ZM12 14v7M4 4l16 16"/>',
+    ),
+    on: createSvgIcon(
+      '<path d="M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6ZM12 14v7"/>',
+    ),
+  },
+  readScreen: {
+    off: createSvgIcon(
+      '<path d="M3 5h18v12H3zM8 21h8M12 17v4M7 9h10M7 13h6M5 4l14 14"/>',
+    ),
+    on: createSvgIcon(
+      '<path d="M3 5h18v12H3zM8 21h8M12 17v4M6 10v3h2l2 2V8l-2 2H6M13 10a3 3 0 0 1 0 3M15 8a6 6 0 0 1 0 7"/>',
+    ),
+  },
+} as const;
+
 const ICONS: Readonly<Record<string, string>> = {
-  reading:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4Zm12.2-.8a5.5 5.5 0 0 1 0 7.6M18.8 5.6a9 9 0 0 1 0 12.8"/></svg>',
-  speechRate:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17a8 8 0 1 1 16 0M12 17l4-5M7 17h10"/></svg>',
-  colorScheme:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18V3Z"/><path d="M12 7h6M12 12h9M12 17h6"/></svg>',
-  zoomIn:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5M10.5 7.5v6M7.5 10.5h6"/></svg>',
-  zoomOut:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5M7.5 10.5h6"/></svg>',
-  largeCursor:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 3 13 10-7 1-3 6L5 3Z"/><path d="m13 15 4 5"/></svg>',
-  crosshair:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/></svg>',
-  fullscreen:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>',
-  pin:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 3 8 8-2 2 3 3-1 1-4-2-5 5-1-1 5-5-2-4-2 2-1-1 2-2-2-2 2-2Z"/></svg>',
-  reset:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8V3m0 0h5M5 3l3.5 3.5A8 8 0 1 1 4 13"/></svg>',
-  help:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.7 9a2.4 2.4 0 1 1 3.4 2.2c-.8.4-1.1.9-1.1 1.8M12 17h.01"/></svg>',
-  readScreen:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v12H3zM8 21h8M12 17v4"/><path d="M7 9h10M7 13h6"/></svg>',
-  exit:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4H4v16h6M14 8l4 4-4 4M8 12h10"/></svg>',
-  viewport:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 9h18"/></svg>',
-  navigation:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h10M4 19h16"/><circle cx="18" cy="12" r="2"/></svg>',
-  interaction:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM7 9h6M7 13h10M7 16h4"/></svg>',
-  service:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 10a7 7 0 0 1 14 0v6M5 13H3v4h4v-7H5M19 13h2v4h-4v-7h2M17 19c-1 1-2.5 2-5 2"/></svg>',
-  list:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg>',
-  content:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h10l4 4v14H5zM15 3v5h5M8 12h8M8 16h8"/></svg>',
-  screenSound:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4Zm12.5 0a4 4 0 0 1 0 6"/></svg>',
+  reading: TOGGLE_ICONS.sound.off,
+  speechRate: renderSpeechRateIcon(1),
+  colorScheme: renderColorSchemeIcon("original"),
+  zoomIn: createSvgIcon(
+    '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5M10.5 7.5v6M7.5 10.5h6"/>',
+  ),
+  zoomOut: createSvgIcon(
+    '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5M7.5 10.5h6"/>',
+  ),
+  largeCursor: TOGGLE_ICONS.cursor.off,
+  crosshair: TOGGLE_ICONS.crosshair.off,
+  fullscreen: TOGGLE_ICONS.fullscreen.off,
+  pin: TOGGLE_ICONS.pin.off,
+  reset: createSvgIcon(
+    '<path d="M5 8V3m0 0h5M5 3l3.5 3.5A8 8 0 1 1 4 13"/>',
+  ),
+  help: createSvgIcon(
+    '<circle cx="12" cy="12" r="9"/><path d="M9.7 9a2.4 2.4 0 1 1 3.4 2.2c-.8.4-1.1.9-1.1 1.8M12 17h.01"/>',
+  ),
+  readScreen: TOGGLE_ICONS.readScreen.off,
+  exit: createSvgIcon(
+    '<path d="M10 4H4v16h6M14 8l4 4-4 4M8 12h10"/>',
+  ),
+  viewport: createSvgIcon(
+    '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 9h18"/>',
+  ),
+  navigation: createSvgIcon(
+    '<path d="M4 5h16M4 12h10M4 19h16"/><circle cx="18" cy="12" r="2"/>',
+  ),
+  interaction: createSvgIcon(
+    '<path d="M4 5h16v14H4zM7 9h6M7 13h10M7 16h4"/>',
+  ),
+  service: createSvgIcon(
+    '<path d="M5 10a7 7 0 0 1 14 0v6M5 13H3v4h4v-7H5M19 13h2v4h-4v-7h2M17 19c-1 1-2.5 2-5 2"/>',
+  ),
+  list: createSvgIcon(
+    '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/>',
+  ),
+  content: createSvgIcon(
+    '<path d="M5 3h10l4 4v14H5zM15 3v5h5M8 12h8M8 16h8"/>',
+  ),
+  screenSound: TOGGLE_ICONS.sound.off,
 };
 
 const SWITCH_FEATURES = new Set<FeatureId>([
@@ -187,6 +241,18 @@ export class ToolbarUI {
   updateConfig(config: ResolvedAccessibilityToolConfig): void {
     this.config = config;
     this.updateHelpLinks();
+    if (this.state) {
+      for (const feature of MAIN_FEATURE_ORDER) {
+        for (const control of this.findControls(feature)) {
+          this.updateControlIcon(feature, control, this.state, true);
+        }
+      }
+      const sound = this.controls.get("screenSound");
+      if (sound) {
+        this.updateControlIcon("screenSound", sound, this.state, true);
+      }
+      this.updateAvailability();
+    }
   }
 
   show(): void {
@@ -229,6 +295,7 @@ export class ToolbarUI {
           );
         }
         this.updateFeatureMeta(feature, control, state);
+        this.updateControlIcon(feature, control, state);
       }
     }
 
@@ -239,6 +306,7 @@ export class ToolbarUI {
         "aria-label",
         `声音开关，当前${state.readingEnabled ? "开启" : "关闭"}`,
       );
+      this.updateControlIcon("screenSound", sound, state);
     }
 
     this.rateSlider.value = String(state.speechRate);
@@ -723,6 +791,24 @@ export class ToolbarUI {
     }
   }
 
+  private updateControlIcon(
+    action: ToolbarAction,
+    control: HTMLElement,
+    state: AccessibilityToolState,
+    force = false,
+  ): void {
+    const icon = control.querySelector<HTMLElement>(".a11y-control__icon");
+    if (!icon) {
+      return;
+    }
+    const presentation = getIconPresentation(action, state);
+    if (force || control.dataset.iconState !== presentation.state) {
+      icon.innerHTML = presentation.markup;
+    }
+    control.dataset.iconState = presentation.state;
+    icon.dataset.iconState = presentation.state;
+  }
+
   private updateHelpLinks(): void {
     for (const control of [this.mainGroup, this.screenGroup]) {
       const link = control.querySelector<HTMLAnchorElement>(
@@ -781,6 +867,126 @@ export class ToolbarUI {
       ) ?? null
     );
   }
+}
+
+interface IconPresentation {
+  markup: string;
+  state: string;
+}
+
+function getIconPresentation(
+  action: ToolbarAction,
+  state: AccessibilityToolState,
+): IconPresentation {
+  switch (action) {
+    case "reading":
+    case "screenSound":
+      return {
+        markup: state.readingEnabled
+          ? TOGGLE_ICONS.sound.on
+          : TOGGLE_ICONS.sound.off,
+        state: `sound-${state.readingEnabled ? "on" : "off"}`,
+      };
+    case "largeCursor":
+      return {
+        markup: state.largeCursor
+          ? TOGGLE_ICONS.cursor.on
+          : TOGGLE_ICONS.cursor.off,
+        state: `cursor-${state.largeCursor ? "on" : "off"}`,
+      };
+    case "crosshair":
+      return {
+        markup: state.crosshair
+          ? TOGGLE_ICONS.crosshair.on
+          : TOGGLE_ICONS.crosshair.off,
+        state: `crosshair-${state.crosshair ? "on" : "off"}`,
+      };
+    case "fullscreen":
+      return {
+        markup: state.isFullscreen
+          ? TOGGLE_ICONS.fullscreen.on
+          : TOGGLE_ICONS.fullscreen.off,
+        state: state.isFullscreen ? "fullscreen-exit" : "fullscreen-enter",
+      };
+    case "pin":
+      return {
+        markup: state.isPinned ? TOGGLE_ICONS.pin.on : TOGGLE_ICONS.pin.off,
+        state: `pin-${state.isPinned ? "on" : "off"}`,
+      };
+    case "readScreen":
+      return {
+        markup: state.isReadScreen
+          ? TOGGLE_ICONS.readScreen.on
+          : TOGGLE_ICONS.readScreen.off,
+        state: `read-screen-${state.isReadScreen ? "on" : "off"}`,
+      };
+    case "speechRate":
+      return {
+        markup: renderSpeechRateIcon(state.speechRate),
+        state: `rate-${formatRate(state.speechRate)}`,
+      };
+    case "colorScheme":
+      return {
+        markup: renderColorSchemeIcon(state.colorScheme),
+        state: `scheme-${state.colorScheme}`,
+      };
+    default: {
+      const iconKey = action.startsWith("region:")
+        ? action.slice("region:".length)
+        : action;
+      return {
+        markup: ICONS[iconKey] ?? ICONS.help ?? "",
+        state: `static-${iconKey}`,
+      };
+    }
+  }
+}
+
+function createSvgIcon(content: string, attributes = ""): string {
+  const suffix = attributes ? ` ${attributes}` : "";
+  return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"${suffix}>${content}</svg>`;
+}
+
+function renderSpeechRateIcon(rate: number): string {
+  const progress = normalizeRange(rate, 0.5, 2);
+  const angle = ((200 + progress * 140) * Math.PI) / 180;
+  const pointerX = formatIconNumber(12 + Math.cos(angle) * 5.5);
+  const pointerY = formatIconNumber(17 + Math.sin(angle) * 5.5);
+  return createSvgIcon(
+    '<path d="M4 17a8 8 0 0 1 16 0M7 17h10"/>' +
+      '<path class="a11y-icon__muted" d="m6 13-1.5-1.2M12 9V7M18 13l1.5-1.2"/>' +
+      `<path data-icon-indicator="rate" d="M12 17L${pointerX} ${pointerY}"/><circle cx="12" cy="17" r="1"/>`,
+  );
+}
+
+function renderColorSchemeIcon(scheme: ColorScheme): string {
+  if (scheme === "original") {
+    return createSvgIcon(
+      '<rect x="3" y="5" width="18" height="14" rx="2.5"/>' +
+        '<path d="M12 5v14M3 12h18"/>' +
+        '<circle cx="7.5" cy="8.5" r="1"/><circle cx="16.5" cy="8.5" r="1"/>' +
+        '<circle cx="7.5" cy="15.5" r="1"/><circle cx="16.5" cy="15.5" r="1"/>',
+      'data-color-scheme="original"',
+    );
+  }
+  return createSvgIcon(
+    '<rect x="3" y="5" width="18" height="14" rx="2.5"/>' +
+      '<path d="M12 5v14"/>' +
+      '<path class="a11y-icon__palette-background" d="M5 7h6v10H5z"/>' +
+      '<path class="a11y-icon__palette-foreground" d="M13 7h6v10h-6z"/>',
+    `data-color-scheme="${scheme}"`,
+  );
+}
+
+function normalizeRange(value: number, minimum: number, maximum: number): number {
+  if (!Number.isFinite(value) || maximum <= minimum) {
+    return 0;
+  }
+  return Math.min(1, Math.max(0, (value - minimum) / (maximum - minimum)));
+}
+
+function formatIconNumber(value: number): string {
+  return Number(value.toFixed(2)).toString();
 }
 
 function formatRate(rate: number): string {
