@@ -146,6 +146,7 @@ pnpm build
 - [CSP 接入](docs/csp.md)
 - [人工无障碍测试清单](docs/manual-testing.md)
 - [兼容性与已知限制](docs/compatibility.md)
+- [云端 TTS 后续开发方案（提案）](docs/cloud-tts-future-plan.md)
 
 ## 隐私
 
