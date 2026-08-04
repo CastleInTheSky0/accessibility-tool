@@ -1,5 +1,13 @@
 # AccessibilityTool
 
+**标准模式**
+
+![AccessibilityTool 桌面端单层盲道轨迹工具栏](docs/images/accessibility-toolbar.png)
+
+**读屏专用模式**
+
+![AccessibilityTool 读屏专用模式工具栏](docs/images/accessibility-toolbar-read-screen.png)
+
 `AccessibilityTool` 是一套面向桌面网站的原生 TypeScript 无障碍工具栏。首次使用由接入页面显式调用启动；成功打开后，默认会在刷新或进入另一个同源且引入相同脚本的页面时静默恢复。工具提供朗读、语速、五种页面配色、页面缩放、大鼠标、十字线、标准全屏、页面焦点黄色轮廓、盲道活动区域深橙色轮廓、六类盲道区域导航，以及标准选项卡与关联面板的键盘增强。
 
 - 版本：`0.1.0`
