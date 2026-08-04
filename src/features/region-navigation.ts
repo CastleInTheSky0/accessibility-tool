@@ -26,6 +26,7 @@ interface RegionNavigationCallbacks {
   requestRegionVisibility?: (region: ScannedRegion) => Promise<boolean>;
   onCountsChange: (counts: Readonly<Record<RegionType, number>>) => void;
   onAnnounce: (message: string) => void;
+  onCurrentRegionChange?: (event: RegionChangeEvent | null) => void;
   onRegionChange: (event: RegionChangeEvent) => void;
   onReturnToCategory: (type: RegionType) => void;
   onDynamicUpdate: () => void;
@@ -126,6 +127,19 @@ export class RegionNavigationController {
         (region) => region.element === previousCurrent.element,
       );
       this.effects.setRegionHighlight(previousCurrent.element);
+      if (
+        this.currentIndex >= 0 &&
+        (this.currentIndex !== previousIndex ||
+          counts[previousCurrent.type] !== previousCounts[previousCurrent.type])
+      ) {
+        this.callbacks.onCurrentRegionChange?.({
+          type: previousCurrent.type,
+          index: this.currentIndex,
+          count: sameType.length,
+          element: previousCurrent.element,
+          label: previousCurrent.label,
+        });
+      }
     }
 
     if (
@@ -143,10 +157,14 @@ export class RegionNavigationController {
   }
 
   clearActiveRegion(): void {
+    const hadCurrentRegion = this.current !== null;
     this.current = null;
     this.currentIndex = -1;
     this.ledger.restore();
     this.effects.clearRegionHighlight();
+    if (hadCurrentRegion) {
+      this.callbacks.onCurrentRegionChange?.(null);
+    }
   }
 
   async navigate(type: RegionType): Promise<boolean> {

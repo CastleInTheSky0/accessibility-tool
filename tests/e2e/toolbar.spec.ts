@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/?debug=1");
@@ -120,6 +120,386 @@ test("opens lazily and supports the toolbar keyboard model", async ({ page }) =>
   );
 });
 
+test("keeps all main controls on one centered row from 1024 to 2048 pixels", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "打开无障碍工具" }).click();
+  const host = page.locator("[data-a11y-tool-host]");
+  const toolbar = host.locator(".a11y-toolbar");
+
+  for (const viewport of [
+    { width: 2048, minimumControlWidth: 80, maximumControlWidth: 85 },
+    { width: 1440, minimumControlWidth: 80, maximumControlWidth: 85 },
+    { width: 1200, minimumControlWidth: 79, maximumControlWidth: 85 },
+    { width: 1024, minimumControlWidth: 68, maximumControlWidth: 76 },
+  ]) {
+    await page.setViewportSize({ width: viewport.width, height: 800 });
+    const metrics = await toolbar.evaluate((element) => {
+      const toolbarRect = element.getBoundingClientRect();
+      const frame = element.querySelector<HTMLElement>(".a11y-toolbar__frame");
+      const frameRect = frame?.getBoundingClientRect();
+      const brandRect = element
+        .querySelector<HTMLElement>(".a11y-toolbar__brand")
+        ?.getBoundingClientRect();
+      const controls = Array.from(
+        element.querySelectorAll<HTMLElement>(
+          '[data-mode="main"] [data-toolbar-item]',
+        ),
+      );
+      const rects = controls.map((control) => control.getBoundingClientRect());
+      const tops = rects.map((rect) => rect.top);
+      const firstControl = rects[0];
+      const lastControl = rects.at(-1);
+      return {
+        background: getComputedStyle(element).backgroundColor,
+        brandWithinFrame: Boolean(
+          frameRect &&
+            brandRect &&
+            brandRect.left >= frameRect.left - 0.5 &&
+            brandRect.right <= frameRect.right + 0.5,
+        ),
+        controlCount: controls.length,
+        controlWidths: rects.map((rect) => rect.width),
+        frameCenterDelta: frameRect
+          ? Math.abs(
+              frameRect.left + frameRect.width / 2 -
+                (toolbarRect.left + toolbarRect.width / 2),
+            )
+          : Number.POSITIVE_INFINITY,
+        frameWidth: frameRect?.width ?? 0,
+        height: toolbarRect.height,
+        firstControlInset: firstControl
+          ? firstControl.left - toolbarRect.left
+          : Number.NEGATIVE_INFINITY,
+        lastControlInset: lastControl
+          ? toolbarRect.right - lastControl.right
+          : Number.NEGATIVE_INFINITY,
+        exitWithinFrame: Boolean(
+          frameRect &&
+            lastControl &&
+            lastControl.left >= frameRect.left - 0.5 &&
+            lastControl.right <= frameRect.right + 0.5,
+        ),
+        overflowX: getComputedStyle(element).overflowX,
+        outerWidth: toolbarRect.width,
+        rowTopSpread: Math.max(...tops) - Math.min(...tops),
+        scrollWidth: element.scrollWidth,
+        clientWidth: element.clientWidth,
+        clipped: rects.some(
+          (rect) =>
+            rect.left < toolbarRect.left - 0.5 ||
+            rect.right > toolbarRect.right + 0.5 ||
+            rect.top < toolbarRect.top - 0.5 ||
+            rect.bottom > toolbarRect.bottom + 0.5,
+        ),
+      };
+    });
+
+    expect(metrics.controlCount).toBe(13);
+    expect(metrics.background).toBe("rgb(24, 27, 30)");
+    expect(metrics.brandWithinFrame).toBe(true);
+    expect(metrics.exitWithinFrame).toBe(true);
+    expect(metrics.outerWidth).toBeCloseTo(viewport.width, 1);
+    expect(metrics.frameWidth).toBeCloseTo(Math.min(viewport.width, 1200), 1);
+    expect(metrics.frameWidth).toBeLessThanOrEqual(1200);
+    expect(metrics.frameCenterDelta).toBeLessThanOrEqual(0.5);
+    expect(metrics.firstControlInset).toBeGreaterThan(4);
+    expect(metrics.lastControlInset).toBeGreaterThan(4);
+    expect(metrics.height).toBeCloseTo(146, 1);
+    expect(metrics.overflowX).toBe("hidden");
+    expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 1);
+    expect(metrics.rowTopSpread).toBeLessThanOrEqual(1);
+    expect(metrics.clipped).toBe(false);
+    for (const controlWidth of metrics.controlWidths) {
+      expect(controlWidth).toBeGreaterThanOrEqual(viewport.minimumControlWidth);
+      expect(controlWidth).toBeLessThanOrEqual(viewport.maximumControlWidth);
+    }
+  }
+
+  const reading = host.locator('[data-mode="main"] [data-action="reading"]');
+  const rate = host.locator('[data-mode="main"] [data-action="speechRate"]');
+  await reading.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(rate).toBeFocused();
+  const focusStyle = await rate.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      color: style.outlineColor,
+      style: style.outlineStyle,
+      width: style.outlineWidth,
+    };
+  });
+  expect(focusStyle).toEqual({
+    color: "rgb(255, 255, 255)",
+    style: "solid",
+    width: "3px",
+  });
+  expect(focusStyle.color).not.toBe("rgb(244, 122, 0)");
+
+  await page.keyboard.press("End");
+  await expect(
+    host.locator('[data-mode="main"] [data-action="exit"]'),
+  ).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("button", { name: "打开无障碍工具" })).toBeFocused();
+});
+
+test("keeps push offsets and toolbar height stable while switching modes", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 800 });
+  await page.evaluate(() => {
+    window.AccessibilityTool.configure({
+      toolbar: { offsetSelectors: [".site-header"] },
+    });
+  });
+  await page.getByRole("button", { name: "打开无障碍工具" }).click();
+  const host = page.locator("[data-a11y-tool-host]");
+  const mainReadScreen = host.locator(
+    '[data-mode="main"] [data-action="readScreen"]',
+  );
+
+  const readGeometry = async (): Promise<{
+    bodyPaddingTop: number;
+    frame: number;
+    headerTop: number;
+    host: number;
+    root: number;
+    toolbar: number;
+  }> =>
+    page.evaluate(() => {
+      const toolHost = document.querySelector<HTMLElement>(
+        "[data-a11y-tool-host]",
+      );
+      const root = toolHost?.shadowRoot?.querySelector<HTMLElement>(
+        "[data-a11y-tool-root]",
+      );
+      const frame = toolHost?.shadowRoot?.querySelector<HTMLElement>(
+        ".a11y-toolbar__frame",
+      );
+      const toolbarElement = toolHost?.shadowRoot?.querySelector<HTMLElement>(
+        ".a11y-toolbar",
+      );
+      const header = document.querySelector<HTMLElement>(".site-header");
+      return {
+        bodyPaddingTop: Number.parseFloat(getComputedStyle(document.body).paddingTop),
+        frame: frame?.getBoundingClientRect().height ?? 0,
+        headerTop: Number.parseFloat(getComputedStyle(header as HTMLElement).top),
+        host: toolHost?.getBoundingClientRect().height ?? 0,
+        root: root?.getBoundingClientRect().height ?? 0,
+        toolbar: toolbarElement?.getBoundingClientRect().height ?? 0,
+      };
+    });
+
+  const mainGeometry = await readGeometry();
+  expect(mainGeometry.host).toBeCloseTo(146, 1);
+  expect(mainGeometry.frame).toBeCloseTo(146, 1);
+  expect(mainGeometry.root).toBeCloseTo(146, 1);
+  expect(mainGeometry.toolbar).toBeCloseTo(146, 1);
+
+  await mainReadScreen.click();
+  const screenGroup = host.locator('[data-mode="screen"]');
+  await expect(screenGroup).toBeVisible();
+  const screenActions = await screenGroup
+    .locator("[data-toolbar-item]")
+    .evaluateAll((controls) =>
+      controls.map((control) => (control as HTMLElement).dataset.action),
+    );
+  expect(screenActions).toEqual([
+    "region:viewport",
+    "region:navigation",
+    "region:interaction",
+    "region:service",
+    "region:list",
+    "region:content",
+    "screenSound",
+    "help",
+    "readScreen",
+    "exit",
+  ]);
+  const screenSound = screenGroup.locator('[data-action="screenSound"]');
+  await expect(screenSound).toHaveAttribute("aria-label", "朗读，当前关闭");
+  await expect(screenSound.locator("[data-control-meta]")).toHaveText("关闭");
+  const screenReadScreen = screenGroup.locator('[data-action="readScreen"]');
+  await expect(screenReadScreen).toHaveAttribute("aria-pressed", "true");
+  await expect(screenReadScreen.locator("[data-control-meta]")).toHaveText(
+    "当前模式",
+  );
+
+  const screenGeometry = await readGeometry();
+  expect(screenGeometry).toEqual(mainGeometry);
+
+  await screenReadScreen.click();
+  await expect(host.locator('[data-mode="main"]')).toBeVisible();
+  expect(await readGeometry()).toEqual(mainGeometry);
+});
+
+test("uses transparent defaults, shared orange switch states and a red exit", async ({
+  page,
+}) => {
+  await page.evaluate(() => {
+    window.AccessibilityTool.configure({
+      speech: {
+        adapter: {
+          isSupported: () => true,
+          speak: (_text, options) => {
+            options.onStart?.();
+            options.onEnd?.();
+          },
+          cancel: () => undefined,
+        },
+      },
+    });
+  });
+  await page.getByRole("button", { name: "打开无障碍工具" }).click();
+  const host = page.locator("[data-a11y-tool-host]");
+  const reading = host.locator('[data-mode="main"] [data-action="reading"]');
+  const rate = host.locator('[data-mode="main"] [data-action="speechRate"]');
+  const pin = host.locator('[data-mode="main"] [data-action="pin"]');
+  const exit = host.locator('[data-mode="main"] [data-action="exit"]');
+
+  await expect(reading).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(reading.locator(".a11y-control__icon")).toHaveCSS(
+    "background-color",
+    "rgb(41, 46, 50)",
+  );
+  await expect(rate).toHaveCSS("border-width", "0px");
+
+  await pin.click();
+  await reading.click();
+  for (const control of [pin, reading]) {
+    await expect(control).toHaveAttribute("aria-pressed", "true");
+    await expect(control.locator(".a11y-control__icon")).toHaveCSS(
+      "background-color",
+      "rgb(244, 122, 0)",
+    );
+    await expect
+      .poll(() =>
+        control.evaluate(
+          (element) => getComputedStyle(element, "::after").width,
+        ),
+      )
+      .toBe("14px");
+    await expect
+      .poll(() => getControlLocalTrackScale(control))
+      .toBeGreaterThan(0.99);
+  }
+  const activeSurfaces = await Promise.all(
+    [pin, reading].map((control) =>
+      control.evaluate((element) => {
+        const style = getComputedStyle(element);
+        const node = getComputedStyle(element, "::after");
+        const track = getComputedStyle(element, "::before");
+        return {
+          background: style.backgroundColor,
+          icon: getComputedStyle(
+            element.querySelector<HTMLElement>(".a11y-control__icon") as HTMLElement,
+          ).backgroundColor,
+          node: node.backgroundColor,
+          nodeRing: node.boxShadow,
+          nodeTransitionDuration: node.transitionDuration,
+          nodeTransitionProperty: node.transitionProperty,
+          nodeWidth: node.width,
+          track: track.backgroundColor,
+          trackOpacity: track.opacity,
+          trackOrigin: track.transformOrigin,
+          trackScaleState: style
+            .getPropertyValue("--a11y-local-track-scale")
+            .trim(),
+          trackTransitionDuration: track.transitionDuration,
+          trackTransitionProperty: track.transitionProperty,
+          trackZIndex: track.zIndex,
+        };
+      }),
+    ),
+  );
+  expect(activeSurfaces[0]).toEqual(activeSurfaces[1]);
+  expect(activeSurfaces[0]).toMatchObject({
+    icon: "rgb(244, 122, 0)",
+    node: "rgb(244, 122, 0)",
+    nodeTransitionDuration: "0.2s, 0.22s, 0.2s, 0.2s",
+    nodeTransitionProperty: "background-color, box-shadow, height, width",
+    nodeWidth: "14px",
+    track: "rgb(244, 122, 0)",
+    trackOpacity: "1",
+    trackOrigin: "52px 1.5px",
+    trackScaleState: "1",
+    trackTransitionDuration: "0.22s, 0.18s",
+    trackTransitionProperty: "transform, opacity",
+    trackZIndex: "-1",
+  });
+  expect(activeSurfaces[0]?.nodeRing).toContain("rgb(24, 27, 30)");
+  expect(activeSurfaces[0]?.nodeRing).toContain("rgb(244, 122, 0)");
+
+  const inactiveTracks = await Promise.all(
+    [rate, exit].map((control) =>
+      control.evaluate((element) => {
+        const node = getComputedStyle(element, "::after");
+        const track = getComputedStyle(element, "::before");
+        return {
+          node: node.backgroundColor,
+          nodeRing: node.boxShadow,
+          opacity: track.opacity,
+          scale: new DOMMatrixReadOnly(track.transform).a,
+          scaleState: getComputedStyle(element)
+            .getPropertyValue("--a11y-local-track-scale")
+            .trim(),
+        };
+      }),
+    ),
+  );
+  expect(inactiveTracks[0]).toMatchObject({
+    nodeRing: "none",
+    opacity: "0",
+    scaleState: "0",
+  });
+  expect(inactiveTracks[0]?.scale).toBeLessThan(0.01);
+  expect(inactiveTracks[1]).toMatchObject({
+    node: "rgb(220, 58, 50)",
+    nodeRing: "none",
+    opacity: "0",
+    scaleState: "0",
+  });
+  expect(inactiveTracks[1]?.scale).toBeLessThan(0.01);
+
+  await expect(exit.locator(".a11y-control__icon")).toHaveCSS(
+    "background-color",
+    "rgb(220, 58, 50)",
+  );
+  const exitNode = await exit.evaluate(
+    (element) => getComputedStyle(element, "::after").backgroundColor,
+  );
+  expect(exitNode).toBe("rgb(220, 58, 50)");
+
+  await reading.click();
+  await expect(reading).toHaveAttribute("aria-pressed", "false");
+  await expect.poll(() => getControlLocalTrackScale(reading)).toBeLessThan(0.01);
+  await expect.poll(() => getControlLocalTrackScale(pin)).toBeGreaterThan(0.99);
+  await expect
+    .poll(() =>
+      reading.evaluate(
+        (element) => getComputedStyle(element, "::after").boxShadow,
+      ),
+    )
+    .toBe("none");
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await reading.click();
+  const reducedMotionStyle = await reading.evaluate((element) => ({
+    nodeTransitionDuration: getComputedStyle(element, "::after")
+      .transitionDuration,
+    trackTransitionDuration: getComputedStyle(element, "::before")
+      .transitionDuration,
+    trackTransitionProperty: getComputedStyle(element, "::before")
+      .transitionProperty,
+  }));
+  expect(reducedMotionStyle).toEqual({
+    nodeTransitionDuration: "0s",
+    trackTransitionDuration: "0s",
+    trackTransitionProperty: "none",
+  });
+});
+
 test("synchronizes sound and read-screen switch icons", async ({ page }) => {
   await page.evaluate(() => {
     window.AccessibilityTool.configure({
@@ -195,7 +575,7 @@ test("uses the danger color for both non-interactive crosshair lines", async ({
     host.locator(".a11y-crosshair--y"),
   ]) {
     await expect(line).toBeVisible();
-    await expect(line).toHaveCSS("background-color", "rgb(216, 25, 18)");
+    await expect(line).toHaveCSS("background-color", "rgb(220, 58, 50)");
     await expect(line).toHaveCSS("pointer-events", "none");
     expect(await line.evaluate((element) => getComputedStyle(element).boxShadow))
       .not.toBe("none");
@@ -476,4 +856,11 @@ async function getBodyPaddingTop(page: Page): Promise<number> {
   return page.evaluate(() =>
     Number.parseFloat(getComputedStyle(document.body).paddingTop),
   );
+}
+
+async function getControlLocalTrackScale(control: Locator): Promise<number> {
+  return control.evaluate((element) => {
+    const transform = getComputedStyle(element, "::before").transform;
+    return transform === "none" ? 0 : new DOMMatrixReadOnly(transform).a;
+  });
 }

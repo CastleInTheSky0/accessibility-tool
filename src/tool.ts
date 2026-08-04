@@ -487,7 +487,7 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
       getToolbarOffset: () =>
         this.state.isPinned && this.state.isCollapsed
           ? 12
-          : this.ui?.getToolbarHeight() ?? 102,
+          : this.ui?.getToolbarHeight() ?? 146,
       requestRegionVisibility: (region) =>
         this.tabs?.requestPanelVisibility(region.element) ??
         Promise.resolve(false),
@@ -496,7 +496,11 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
         this.reading?.cancel();
         this.announce(message);
       },
-      onRegionChange: (event) => this.emitter.emit("regionchange", event),
+      onCurrentRegionChange: (event) => this.ui?.setCurrentRegion(event),
+      onRegionChange: (event) => {
+        this.ui?.setCurrentRegion(event);
+        this.emitter.emit("regionchange", event);
+      },
       onReturnToCategory: (type) => this.ui?.focusAction(`region:${type}`),
       onDynamicUpdate: () => {
         if (this.state.isReadScreen) {

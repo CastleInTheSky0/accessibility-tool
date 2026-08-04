@@ -19,7 +19,14 @@ describe("configuration", () => {
     expect(config.toolbar.layoutMode).toBe("overlay");
     expect(config.persistOpenState).toBe(true);
     expect(config.toolbar.theme.accent).toBe("#0af");
-    expect(config.toolbar.theme.background).toBe("#2d2f31");
+    expect(config.toolbar.theme.background).toBe("#181b1e");
+    expect(config.toolbar.theme.controlBackground).toBe("#292e32");
+    expect(config.toolbar.theme.controlForeground).toBe("#f5f5f2");
+    expect(config.toolbar.theme.danger).toBe("#dc3a32");
+    expect(config.toolbar.theme.height).toBe("146px");
+    expect(config.toolbar.theme.controlRadius).toBe("13px");
+    expect(config.toolbar.theme.controlSize).toBe("84px");
+    expect(config.toolbar.theme.gap).toBe("0px");
     expect(config.features.crosshair).toBe(false);
     expect(config.features.reading).toBe(true);
     expect(config.regions.selectors.service).toBe("[data-service]");

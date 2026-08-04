@@ -554,6 +554,110 @@ describe("RegionNavigationController", () => {
     );
     controller.stop();
   });
+
+  it("notifies toolbar state once when the active region is cleared", async () => {
+    document.body.innerHTML = `
+      <section id="service-a"></section>
+      <button id="outside">外部</button>
+    `;
+    const onRegionChange = vi.fn();
+    const onCurrentRegionChange = vi.fn();
+    const controller = createController(
+      createEffects(),
+      vi.fn(),
+      onRegionChange,
+      undefined,
+      onCurrentRegionChange,
+    );
+    controller.start();
+    controller.update([region(get("service-a"))], [document], "initial");
+
+    await controller.navigate("service");
+    expect(onRegionChange).toHaveBeenCalledTimes(1);
+    expect(onCurrentRegionChange).not.toHaveBeenCalled();
+
+    get("outside").focus();
+    expect(onCurrentRegionChange).toHaveBeenCalledTimes(1);
+    expect(onCurrentRegionChange).toHaveBeenLastCalledWith(null);
+
+    controller.clearActiveRegion();
+    controller.stop();
+    expect(onCurrentRegionChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("syncs a changed current index and count without a public region event", async () => {
+    document.body.innerHTML = `
+      <section id="viewport-a"></section>
+      <section id="viewport-b"></section>
+    `;
+    const first = get("viewport-a");
+    const second = get("viewport-b");
+    const onRegionChange = vi.fn();
+    const onCurrentRegionChange = vi.fn();
+    const controller = createController(
+      createEffects(),
+      vi.fn(),
+      onRegionChange,
+      undefined,
+      onCurrentRegionChange,
+    );
+    controller.start();
+    controller.update(
+      [region(first, "viewport"), region(second, "viewport")],
+      [document],
+      "initial",
+    );
+    await controller.navigate("viewport");
+    onRegionChange.mockClear();
+    onCurrentRegionChange.mockClear();
+
+    const inserted = document.createElement("section");
+    inserted.id = "viewport-new";
+    first.before(inserted);
+    controller.update(
+      [
+        region(inserted, "viewport"),
+        region(first, "viewport"),
+        region(second, "viewport"),
+      ],
+      [document],
+      "mutation",
+    );
+
+    expect(onRegionChange).not.toHaveBeenCalled();
+    expect(onCurrentRegionChange).toHaveBeenCalledTimes(1);
+    expect(onCurrentRegionChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "viewport",
+        index: 1,
+        count: 3,
+        element: first,
+      }),
+    );
+    controller.stop();
+  });
+
+  it("does not create or clear current state after failed navigation", async () => {
+    document.body.innerHTML = "<button id=outside>外部</button>";
+    const onRegionChange = vi.fn();
+    const onCurrentRegionChange = vi.fn();
+    const controller = createController(
+      createEffects(),
+      vi.fn(),
+      onRegionChange,
+      undefined,
+      onCurrentRegionChange,
+    );
+    controller.start();
+    controller.update([], [document], "initial");
+
+    await expect(controller.navigate("service")).resolves.toBe(false);
+    controller.clearActiveRegion();
+    controller.stop();
+
+    expect(onRegionChange).not.toHaveBeenCalled();
+    expect(onCurrentRegionChange).not.toHaveBeenCalled();
+  });
 });
 
 function createController(
@@ -561,6 +665,7 @@ function createController(
   onAnnounce = vi.fn(),
   onRegionChange = vi.fn(),
   requestRegionVisibility?: (region: ScannedRegion) => Promise<boolean>,
+  onCurrentRegionChange = vi.fn(),
 ): RegionNavigationController {
   return new RegionNavigationController(
     effects,
@@ -569,6 +674,7 @@ function createController(
       ...(requestRegionVisibility ? { requestRegionVisibility } : {}),
       onCountsChange: vi.fn(),
       onAnnounce,
+      onCurrentRegionChange,
       onRegionChange,
       onReturnToCategory: vi.fn(),
       onDynamicUpdate: vi.fn(),

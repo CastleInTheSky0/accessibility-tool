@@ -8,10 +8,14 @@ test("isolates toolbar styles from hostile host CSS", async ({ page }) => {
     .locator("[data-a11y-tool-host]")
     .locator('[data-action="reading"]');
   await expect(control).toBeVisible();
-  await expect(control).toHaveCSS("border-radius", "8px");
-  await expect(control).toHaveCSS("background-color", "rgb(245, 245, 243)");
+  await expect(control).toHaveCSS("border-radius", "13px");
+  await expect(control).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(control.locator(".a11y-control__icon")).toHaveCSS(
+    "background-color",
+    "rgb(41, 46, 50)",
+  );
   const icon = control.locator("svg");
-  await expect(icon).toHaveCSS("width", "27px");
+  await expect(icon).toHaveCSS("width", "24px");
   await expect(icon).toHaveCSS("transform", "none");
 });
 
@@ -55,6 +59,9 @@ test("honors disabled semantic auto-detection", async ({ page }) => {
   await navigation.focus();
   await page.keyboard.press("Alt+Shift+Digit2");
   await expect(navigation).toBeFocused();
+  await expect(host.locator("[data-region-current]")).toHaveCount(0);
+  await expect(host.locator('[aria-current="location"]')).toHaveCount(0);
+  await expect(navigation.locator("[data-region-count]")).toHaveText("0");
 });
 
 test("adds no serious or critical axe violations", async ({ page }) => {

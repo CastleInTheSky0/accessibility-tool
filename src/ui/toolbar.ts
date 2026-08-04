@@ -10,6 +10,7 @@ import type {
   AccessibilityToolState,
   ColorScheme,
   FeatureId,
+  RegionChangeEvent,
   RegionType,
 } from "../types";
 
@@ -146,6 +147,8 @@ const SWITCH_FEATURES = new Set<FeatureId>([
 export class ToolbarUI {
   private readonly root: HTMLDivElement;
   private readonly toolbar: HTMLDivElement;
+  private readonly toolbarFrame: HTMLDivElement;
+  private readonly brandRail: HTMLDivElement;
   private readonly mainGroup: HTMLDivElement;
   private readonly screenGroup: HTMLDivElement;
   private readonly ratePanel: HTMLDivElement;
@@ -165,6 +168,10 @@ export class ToolbarUI {
     list: 0,
     content: 0,
   };
+  private currentRegion: Pick<
+    RegionChangeEvent,
+    "type" | "index" | "count"
+  > | null = null;
   private state: AccessibilityToolState | null = null;
   private config: ResolvedAccessibilityToolConfig;
   private collapseTimer: number | null = null;
@@ -187,6 +194,11 @@ export class ToolbarUI {
     this.toolbar.setAttribute("aria-label", "无障碍工具栏");
     this.toolbar.setAttribute("aria-orientation", "horizontal");
 
+    this.toolbarFrame = document.createElement("div");
+    this.toolbarFrame.className = "a11y-toolbar__frame";
+
+    this.brandRail = this.buildBrandRail();
+
     this.mainGroup = document.createElement("div");
     this.mainGroup.className = "a11y-toolbar__items";
     this.mainGroup.dataset.mode = "main";
@@ -202,7 +214,8 @@ export class ToolbarUI {
 
     this.buildMainControls();
     this.buildScreenControls();
-    this.toolbar.append(this.mainGroup, this.screenGroup);
+    this.toolbarFrame.append(this.brandRail, this.mainGroup, this.screenGroup);
+    this.toolbar.append(this.toolbarFrame);
 
     this.ratePanel = this.buildRatePanel();
 
@@ -263,6 +276,7 @@ export class ToolbarUI {
   hide(): void {
     this.closeRatePanel(false);
     this.cancelCollapse();
+    this.setCurrentRegion(null);
     this.hideCrosshair();
     this.hideHighlight();
     this.root.hidden = true;
@@ -302,10 +316,15 @@ export class ToolbarUI {
     const sound = this.controls.get("screenSound");
     sound?.setAttribute("aria-pressed", String(state.readingEnabled));
     if (sound) {
+      const soundState = state.readingEnabled ? "开启" : "关闭";
       sound.setAttribute(
         "aria-label",
-        `声音开关，当前${state.readingEnabled ? "开启" : "关闭"}`,
+        `朗读，当前${soundState}`,
       );
+      const meta = sound.querySelector<HTMLElement>("[data-control-meta]");
+      if (meta) {
+        meta.textContent = soundState;
+      }
       this.updateControlIcon("screenSound", sound, state);
     }
 
@@ -320,19 +339,29 @@ export class ToolbarUI {
 
   setRegionCounts(counts: Readonly<Record<RegionType, number>>): void {
     this.regionCounts = { ...counts };
+    if (this.currentRegion) {
+      const count = counts[this.currentRegion.type];
+      this.currentRegion =
+        count > this.currentRegion.index
+          ? { ...this.currentRegion, count }
+          : null;
+    }
     for (const type of REGION_TYPES) {
-      const control = this.controls.get(`region:${type}`);
-      if (!control) {
-        continue;
-      }
-      const count = counts[type];
-      const meta = control.querySelector<HTMLElement>("[data-control-meta]");
-      if (meta) {
-        meta.textContent = `(${count})`;
-      }
-      control.setAttribute("aria-label", `${REGION_LABELS[type]}，共 ${count} 个`);
-      control.setAttribute("aria-disabled", String(count === 0));
-      control.toggleAttribute("data-skip-toolbar-nav", count === 0);
+      this.updateRegionControl(type);
+    }
+  }
+
+  setCurrentRegion(event: RegionChangeEvent | null): void {
+    this.currentRegion =
+      event && event.index >= 0 && event.index < event.count
+        ? {
+            type: event.type,
+            index: event.index,
+            count: event.count,
+          }
+        : null;
+    for (const type of REGION_TYPES) {
+      this.updateRegionControl(type);
     }
   }
 
@@ -479,7 +508,25 @@ export class ToolbarUI {
     const parsed = Number.parseFloat(
       getComputedStyle(this.host).getPropertyValue("--a11y-toolbar-height"),
     );
-    return Number.isFinite(parsed) ? parsed : 102;
+    return Number.isFinite(parsed) ? parsed : 146;
+  }
+
+  private buildBrandRail(): HTMLDivElement {
+    const brand = document.createElement("div");
+    brand.className = "a11y-toolbar__brand";
+    brand.setAttribute("aria-hidden", "true");
+    brand.innerHTML = [
+      '<span class="a11y-brand__dots">',
+      "<i></i><i></i><i></i><i></i><i></i><i></i>",
+      "</span>",
+      '<span class="a11y-brand__mode" data-brand-mode="main">',
+      "<strong>A11Y</strong><small>辅助工具</small>",
+      "</span>",
+      '<span class="a11y-brand__mode" data-brand-mode="screen">',
+      "<small>盲道导航</small>",
+      "</span>",
+    ].join("");
+    return brand;
   }
 
   private buildMainControls(): void {
@@ -497,14 +544,14 @@ export class ToolbarUI {
         this.createControl(`region:${type}`, REGION_LABELS[type], type),
       );
     }
-    if (this.config.features.readScreen) {
-      this.screenGroup.append(this.createControl("readScreen", "读屏专用"));
-    }
     if (this.config.features.reading) {
-      this.screenGroup.append(this.createControl("screenSound", "声音开关"));
+      this.screenGroup.append(this.createControl("screenSound", "朗读"));
     }
     if (this.config.features.help) {
       this.screenGroup.append(this.createControl("help", "帮助"));
+    }
+    if (this.config.features.readScreen) {
+      this.screenGroup.append(this.createControl("readScreen", "读屏专用"));
     }
     if (this.config.features.exit) {
       this.screenGroup.append(this.createControl("exit", "退出"));
@@ -531,6 +578,12 @@ export class ToolbarUI {
     control.dataset.toolbarItem = "";
     control.dataset.action = action;
     control.setAttribute("aria-label", label);
+    const regionType = action.startsWith("region:")
+      ? (action.slice("region:".length) as RegionType)
+      : null;
+    if (regionType) {
+      control.dataset.regionControl = regionType;
+    }
     if (action === "speechRate") {
       control.setAttribute("aria-haspopup", "dialog");
       control.setAttribute("aria-expanded", "false");
@@ -538,10 +591,21 @@ export class ToolbarUI {
     if (SWITCH_FEATURES.has(action as FeatureId) || action === "screenSound") {
       control.setAttribute("aria-pressed", "false");
     }
+    const labelMarkup = regionType
+      ? [
+          '<span class="a11y-control__label">',
+          `<span>${label}</span>`,
+          '<span class="a11y-control__count" data-region-count>0</span>',
+          "</span>",
+        ].join("")
+      : `<span class="a11y-control__label">${label}</span>`;
+    const regionShortcut = regionType
+      ? `ALT + ${REGION_TYPES.indexOf(regionType) + 1}`
+      : "";
     control.innerHTML = [
       `<span class="a11y-control__icon">${ICONS[icon] ?? ICONS.help}</span>`,
-      `<span class="a11y-control__label">${label}</span>`,
-      '<span class="a11y-control__meta" data-control-meta></span>',
+      labelMarkup,
+      `<span class="a11y-control__meta" data-control-meta>${regionShortcut}</span>`,
     ].join("");
     this.controls.set(action, control);
     return control;
@@ -735,6 +799,33 @@ export class ToolbarUI {
     }
   }
 
+  private updateRegionControl(type: RegionType): void {
+    const control = this.controls.get(`region:${type}`);
+    if (!control) {
+      return;
+    }
+    const count = this.regionCounts[type];
+    const current =
+      this.currentRegion?.type === type ? this.currentRegion : null;
+    const countLabel = control.querySelector<HTMLElement>(
+      "[data-region-count]",
+    );
+    if (countLabel) {
+      countLabel.textContent = current
+        ? `${current.index + 1}/${current.count}`
+        : String(count);
+    }
+    control.setAttribute("aria-label", `${REGION_LABELS[type]}，共 ${count} 个`);
+    control.setAttribute("aria-disabled", String(count === 0));
+    control.toggleAttribute("data-skip-toolbar-nav", count === 0);
+    control.toggleAttribute("data-region-current", Boolean(current));
+    if (current) {
+      control.setAttribute("aria-current", "location");
+    } else {
+      control.removeAttribute("aria-current");
+    }
+  }
+
   private getPressedState(
     feature: FeatureId,
     state: AccessibilityToolState,
@@ -767,6 +858,12 @@ export class ToolbarUI {
       return;
     }
     switch (feature) {
+      case "reading": {
+        const readingState = state.readingEnabled ? "开启" : "关闭";
+        meta.textContent = readingState;
+        control.setAttribute("aria-label", `朗读，当前${readingState}`);
+        break;
+      }
       case "speechRate":
         meta.textContent = `${formatRate(state.speechRate)}×`;
         control.setAttribute("aria-label", `语速，当前 ${formatRate(state.speechRate)} 倍`);
@@ -785,6 +882,48 @@ export class ToolbarUI {
           "aria-label",
           `${FEATURE_LABELS[feature]}，当前 ${Math.round(state.zoom * 100)}%`,
         );
+        break;
+      case "largeCursor": {
+        const cursorState = state.largeCursor ? "开启" : "关闭";
+        meta.textContent = cursorState;
+        control.setAttribute("aria-label", `大鼠标，当前${cursorState}`);
+        break;
+      }
+      case "crosshair": {
+        const crosshairState = state.crosshair ? "开启" : "关闭";
+        meta.textContent = crosshairState;
+        control.setAttribute("aria-label", `十字线，当前${crosshairState}`);
+        break;
+      }
+      case "fullscreen":
+        meta.textContent = state.isFullscreen ? "全屏" : "标准";
+        control.setAttribute(
+          "aria-label",
+          `大界面，当前${state.isFullscreen ? "全屏" : "标准"}`,
+        );
+        break;
+      case "pin":
+        meta.textContent = state.isPinned ? "已开启" : "自动收起";
+        control.setAttribute(
+          "aria-label",
+          `固定，当前${state.isPinned ? "已固定" : "未固定"}`,
+        );
+        break;
+      case "reset":
+        meta.textContent = "恢复默认";
+        break;
+      case "help":
+        meta.textContent = "操作说明";
+        break;
+      case "readScreen":
+        meta.textContent = state.isReadScreen ? "当前模式" : "标准模式";
+        control.setAttribute(
+          "aria-label",
+          state.isReadScreen ? "读屏专用，当前模式" : "读屏专用，标准模式",
+        );
+        break;
+      case "exit":
+        meta.textContent = "关闭工具";
         break;
       default:
         meta.textContent = "";
