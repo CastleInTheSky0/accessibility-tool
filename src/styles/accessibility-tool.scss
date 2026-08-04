@@ -1,3 +1,4 @@
+$host-z: 2147483647;
 $toolbar-z: 2147483646;
 $overlay-z: 2147483645;
 
@@ -38,7 +39,7 @@ $overlay-z: 2147483645;
   --a11y-control-bg: #292e32;
   --a11y-control-fg: #f5f5f2;
   --a11y-accent: #f47a00;
-  --a11y-danger: #dc3a32;
+  --a11y-danger: #ff1f1f;
   --a11y-toolbar-height: 146px;
   --a11y-control-radius: 13px;
   --a11y-font-size: 14px;
@@ -59,7 +60,7 @@ $overlay-z: 2147483645;
   right: 0 !important;
   top: 0 !important;
   width: 100% !important;
-  z-index: $toolbar-z !important;
+  z-index: $host-z !important;
 }
 
 :host([hidden]) {
@@ -702,13 +703,13 @@ $overlay-z: 2147483645;
 
 .a11y-crosshair {
   background: var(--a11y-danger);
-  box-shadow:
-    0 0 0 1px rgb(255 255 255 / 82%),
-    0 0 0 2px rgb(0 0 0 / 58%);
+  border: 0;
+  box-shadow: none;
+  outline: 0;
 }
 
 .a11y-crosshair--x {
-  height: 2px;
+  height: 3px;
   left: 0;
   top: var(--a11y-crosshair-y, 50%);
   width: 100vw;
@@ -718,7 +719,7 @@ $overlay-z: 2147483645;
   height: 100vh;
   left: var(--a11y-crosshair-x, 50%);
   top: 0;
-  width: 2px;
+  width: 3px;
 }
 
 .a11y-highlight {

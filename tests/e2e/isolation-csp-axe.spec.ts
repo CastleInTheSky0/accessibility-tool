@@ -4,9 +4,9 @@ import { expect, test } from "@playwright/test";
 test("isolates toolbar styles from hostile host CSS", async ({ page }) => {
   await page.goto("/demos/hostile.html?debug=1");
   await page.getByRole("button", { name: "打开隔离工具栏" }).click();
-  const control = page
-    .locator("[data-a11y-tool-host]")
-    .locator('[data-action="reading"]');
+  const host = page.locator("[data-a11y-tool-host]");
+  const control = host.locator('[data-action="reading"]');
+  await expect(host).toHaveCSS("z-index", "2147483647");
   await expect(control).toBeVisible();
   await expect(control).toHaveCSS("border-radius", "13px");
   await expect(control).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
@@ -17,6 +17,21 @@ test("isolates toolbar styles from hostile host CSS", async ({ page }) => {
   const icon = control.locator("svg");
   await expect(icon).toHaveCSS("width", "24px");
   await expect(icon).toHaveCSS("transform", "none");
+
+  await page.evaluate(() => {
+    const blocker = document.createElement("aside");
+    blocker.id = "hostile-z-index-blocker";
+    blocker.style.cssText =
+      "position:fixed;inset:0 0 auto 0;height:146px;background:#f0f;z-index:2147483646;pointer-events:auto";
+    document.body.append(blocker);
+  });
+  expect(
+    await page.evaluate(() =>
+      document
+        .elementFromPoint(20, 20)
+        ?.matches("[data-a11y-tool-host]"),
+    ),
+  ).toBe(true);
 });
 
 test("uses a closed Shadow Root outside debug mode", async ({ page }) => {

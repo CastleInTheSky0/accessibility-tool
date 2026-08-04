@@ -455,7 +455,7 @@ test("uses transparent defaults, shared orange switch states and a red exit", as
   });
   expect(inactiveTracks[0]?.scale).toBeLessThan(0.01);
   expect(inactiveTracks[1]).toMatchObject({
-    node: "rgb(220, 58, 50)",
+    node: "rgb(255, 31, 31)",
     nodeRing: "none",
     opacity: "0",
     scaleState: "0",
@@ -464,12 +464,12 @@ test("uses transparent defaults, shared orange switch states and a red exit", as
 
   await expect(exit.locator(".a11y-control__icon")).toHaveCSS(
     "background-color",
-    "rgb(220, 58, 50)",
+    "rgb(255, 31, 31)",
   );
   const exitNode = await exit.evaluate(
     (element) => getComputedStyle(element, "::after").backgroundColor,
   );
-  expect(exitNode).toBe("rgb(220, 58, 50)");
+  expect(exitNode).toBe("rgb(255, 31, 31)");
 
   await reading.click();
   await expect(reading).toHaveAttribute("aria-pressed", "false");
@@ -560,7 +560,7 @@ test("synchronizes sound and read-screen switch icons", async ({ page }) => {
   );
 });
 
-test("uses the danger color for both non-interactive crosshair lines", async ({
+test("uses configurable pure danger color for both 3px non-interactive crosshair lines", async ({
   page,
 }) => {
   await page.getByRole("button", { name: "打开无障碍工具" }).click();
@@ -570,31 +570,41 @@ test("uses the danger color for both non-interactive crosshair lines", async ({
   await expect(crosshair).toHaveAttribute("data-icon-state", "crosshair-on");
   await page.mouse.move(480, 360);
 
-  for (const line of [
-    host.locator(".a11y-crosshair--x"),
-    host.locator(".a11y-crosshair--y"),
-  ]) {
+  const horizontal = host.locator(".a11y-crosshair--x");
+  const vertical = host.locator(".a11y-crosshair--y");
+  for (const line of [horizontal, vertical]) {
     await expect(line).toBeVisible();
-    await expect(line).toHaveCSS("background-color", "rgb(220, 58, 50)");
+    await expect(line).toHaveAttribute("aria-hidden", "true");
+    await expect(line).toHaveCSS("background-color", "rgb(255, 31, 31)");
+    await expect(line).toHaveCSS("position", "fixed");
     await expect(line).toHaveCSS("pointer-events", "none");
-    expect(await line.evaluate((element) => getComputedStyle(element).boxShadow))
-      .not.toBe("none");
+    await expect(line).toHaveCSS("border-width", "0px");
+    await expect(line).toHaveCSS("box-shadow", "none");
+    await expect(line).toHaveCSS("outline-style", "none");
   }
+  await expect(horizontal).toHaveCSS("height", "3px");
+  await expect(vertical).toHaveCSS("width", "3px");
+  await expect(
+    host.locator(
+      '[data-mode="main"] [data-action="exit"] .a11y-control__icon',
+    ),
+  ).toHaveCSS("background-color", "rgb(255, 31, 31)");
 
   await page.evaluate(() => {
     window.AccessibilityTool.configure({
       toolbar: { theme: { danger: "#b00020" } },
     });
   });
-  for (const line of [
-    host.locator(".a11y-crosshair--x"),
-    host.locator(".a11y-crosshair--y"),
-  ]) {
+  for (const line of [horizontal, vertical]) {
     await expect(line).toHaveCSS("background-color", "rgb(176, 0, 32)");
     await expect(line).toHaveCSS("pointer-events", "none");
-    expect(await line.evaluate((element) => getComputedStyle(element).boxShadow))
-      .not.toBe("none");
+    await expect(line).toHaveCSS("box-shadow", "none");
   }
+  await expect(
+    host.locator(
+      '[data-mode="main"] [data-action="exit"] .a11y-control__icon',
+    ),
+  ).toHaveCSS("background-color", "rgb(176, 0, 32)");
 });
 
 test("restores persisted value and switch icon states", async ({ page }) => {

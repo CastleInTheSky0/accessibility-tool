@@ -22,7 +22,7 @@ describe("configuration", () => {
     expect(config.toolbar.theme.background).toBe("#181b1e");
     expect(config.toolbar.theme.controlBackground).toBe("#292e32");
     expect(config.toolbar.theme.controlForeground).toBe("#f5f5f2");
-    expect(config.toolbar.theme.danger).toBe("#dc3a32");
+    expect(config.toolbar.theme.danger).toBe("#ff1f1f");
     expect(config.toolbar.theme.height).toBe("146px");
     expect(config.toolbar.theme.controlRadius).toBe("13px");
     expect(config.toolbar.theme.controlSize).toBe("84px");

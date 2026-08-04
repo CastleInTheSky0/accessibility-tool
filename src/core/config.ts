@@ -91,7 +91,7 @@ export const DEFAULT_CONFIG: ResolvedAccessibilityToolConfig = {
       controlBackground: "#292e32",
       controlForeground: "#f5f5f2",
       accent: "#f47a00",
-      danger: "#dc3a32",
+      danger: "#ff1f1f",
       height: "146px",
       controlRadius: "13px",
       fontSize: "14px",
