@@ -170,3 +170,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 6: 状态化图标与红色十字线
+
+**Date**: 2026-08-04
+**Task**: 状态化图标与红色十字线
+**Branch**: `feat/accessibility-tool-v0.1`
+
+### Summary
+
+完成工具栏状态化图标、红色十字线及 Chrome/Edge 回归验证，并保留用户 public 文件。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `25a75d5` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
