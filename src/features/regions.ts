@@ -35,6 +35,7 @@ interface RegionScannerCallbacks {
   ) => void;
   onRouteChange: () => void;
   onError: (error: unknown, message: string) => void;
+  shouldSkipRegion?: (element: HTMLElement) => boolean;
 }
 
 const SEMANTIC_SELECTORS: Readonly<Record<RegionType, string>> = {
@@ -201,6 +202,7 @@ export class RegionScanner {
   private classify(element: HTMLElement): ScannedRegion | null {
     if (
       element.closest(`[${TOOL_HOST_ATTRIBUTE}]`) ||
+      this.callbacks.shouldSkipRegion?.(element) ||
       this.shouldIgnore(element)
     ) {
       return null;

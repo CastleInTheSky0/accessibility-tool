@@ -7,6 +7,11 @@ export type {
   AccessibilityToolEventMap,
   AccessibilityToolOpenOptions,
   AccessibilityToolState,
+  DomTarget,
+  RegionCode,
+  RegionRegistrationConfig,
   RegionType,
+  RegistrationHandle,
   SpeechAdapter,
+  TabRegistrationItem,
 } from "./types";

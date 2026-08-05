@@ -52,6 +52,49 @@ export class DomLedger {
     this.addedNodes.add(node);
   }
 
+  restoreAttribute(element: Element, name: string): void {
+    const snapshot = this.attributes.get(element);
+    if (!snapshot?.has(name)) {
+      return;
+    }
+    const value = snapshot.get(name);
+    if (value === null) {
+      element.removeAttribute(name);
+    } else if (value !== undefined) {
+      element.setAttribute(name, value);
+    }
+    snapshot.delete(name);
+    if (snapshot.size === 0) {
+      this.attributes.delete(element);
+    }
+  }
+
+  restoreElement(element: Element): void {
+    const attributeSnapshot = this.attributes.get(element);
+    if (attributeSnapshot) {
+      for (const name of Array.from(attributeSnapshot.keys())) {
+        this.restoreAttribute(element, name);
+      }
+    }
+
+    const htmlElement = element as HTMLElement;
+    const styleSnapshot = this.styles.get(htmlElement);
+    if (styleSnapshot) {
+      for (const [property, style] of styleSnapshot) {
+        if (style.value) {
+          htmlElement.style.setProperty(property, style.value, style.priority);
+        } else {
+          htmlElement.style.removeProperty(property);
+        }
+      }
+      this.styles.delete(htmlElement);
+    }
+
+    if (this.addedNodes.delete(element)) {
+      element.parentNode?.removeChild(element);
+    }
+  }
+
   restore(): void {
     for (const [element, snapshot] of this.attributes) {
       for (const [name, value] of snapshot) {

@@ -1,0 +1,7 @@
+{"file":".trellis/spec/frontend/index.md","reason":"Frontend spec entry point and documentation language convention."}
+{"file":".trellis/spec/frontend/accessibility-tool-contract.md","reason":"Authoritative public API, DOM protocol, tabs, region, lifecycle, error and test contract."}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"Public TypeScript surface and runtime validation context."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Frontend quality and verification context."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Requirement to extend existing scanner, tabs and ledger mechanisms instead of duplicating them."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"API-to-DOM-to-scanner-to-navigation lifecycle crosses public types and runtime layers."}
+{"file":".trellis/tasks/08-05-dom-region-registration/research/existing-runtime-integration.md","reason":"Repository-specific integration findings and ownership design."}

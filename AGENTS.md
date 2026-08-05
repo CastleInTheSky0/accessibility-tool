@@ -19,3 +19,9 @@ If you're using Codex or another agent-capable tool, additional project-scoped h
 Managed by Trellis. Edits outside this block are preserved; edits inside may be overwritten by a future `trellis update`.
 
 <!-- TRELLIS:END -->
+
+## Git 提交规范
+
+- Git 提交信息使用 Conventional Commits 格式；`type` / `scope` 可保留英文标识，冒号后的标题描述必须使用中文。
+- 提交正文如有内容，也必须使用中文。
+- 示例：`feat: 新增 JavaScript 盲道区域与选项卡注册 API`。

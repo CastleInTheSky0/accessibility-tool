@@ -404,10 +404,13 @@ export function normalizeText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
-export function createUniqueId(prefix: string, documentRef = document): string {
+export function createUniqueId(
+  prefix: string,
+  root: Document | ShadowRoot = document,
+): string {
   const id = `${prefix}-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
-  return documentRef.getElementById(id)
-    ? createUniqueId(prefix, documentRef)
+  return root.getElementById(id)
+    ? createUniqueId(prefix, root)
     : id;
 }
 

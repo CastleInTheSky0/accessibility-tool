@@ -17,6 +17,7 @@ import {
   OpenStateStore,
   PreferenceStore,
 } from "./core/storage";
+import { DomRegistrationController } from "./features/dom-registration";
 import { PageEffectsController } from "./features/page-effects";
 import { ReadingController } from "./features/reading";
 import { RegionNavigationController } from "./features/region-navigation";
@@ -32,7 +33,10 @@ import type {
   AccessibilityToolOpenOptions,
   AccessibilityToolState,
   PersistedPreferences,
+  RegionRegistrationConfig,
+  RegistrationHandle,
   RegionType,
+  TabRegistrationItem,
 } from "./types";
 
 type OpenMode = "explicit" | "restore";
@@ -55,6 +59,15 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
   private readonly stores = new Map<string, PreferenceStore>();
   private readonly openStateStores = new Map<string, OpenStateStore>();
   private readonly shortcutDocuments = new Set<Document>();
+  private readonly registrations = new DomRegistrationController({
+    getConfig: () => (this.state.isOpen ? this.activeConfig : this.baseConfig),
+    beforeTabChange: (elements) => this.tabs?.releaseElements(elements),
+    onChange: () => {
+      if (this.state.isOpen) {
+        this.scanner?.refresh();
+      }
+    },
+  });
 
   private lastTrigger: HTMLElement | null = null;
   private host: HTMLDivElement | null = null;
@@ -95,6 +108,16 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
       this.applyState(false);
     }
     return this;
+  }
+
+  registerRegions(
+    configs: RegionRegistrationConfig[],
+  ): RegistrationHandle {
+    return this.registrations.registerRegions(configs);
+  }
+
+  registerTabs(configs: TabRegistrationItem[]): RegistrationHandle {
+    return this.registrations.registerTabs(configs);
   }
 
   async open(
@@ -315,6 +338,7 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
       await this.closeInternal(false);
     }
     this.teardownRuntimeNodes();
+    this.registrations.disposeAll(false);
     this.triggerLedger.restore();
     this.triggers.clear();
     this.lastTrigger = null;
@@ -547,6 +571,8 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
         this.regionNavigation?.resetPositions();
       },
       onError: (error, message) => this.reportError(error, message),
+      shouldSkipRegion: (element) =>
+        this.registrations.isRegisteredTab(element),
     });
   }
 

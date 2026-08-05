@@ -4,6 +4,8 @@
 
 ```ts
 AccessibilityTool.configure(config);
+const regions = AccessibilityTool.registerRegions(configs);
+const tabs = AccessibilityTool.registerTabs(configs);
 await AccessibilityTool.open({ trigger?, config? });
 await AccessibilityTool.close();
 await AccessibilityTool.toggle({ trigger?, config? });
@@ -20,6 +22,111 @@ AccessibilityTool.off(eventName, listener);
 站点级功能显隐和自定义语音适配器应在首次 `open()` 前配置；工具已经打开后修改这两类配置，将在下次关闭并重新打开时完整生效。主题、区域选择器等运行时配置可以即时刷新。
 
 自动恢复在 DOM ready 后读取最终站点配置，因此自定义 `storageKey` 应在 `DOMContentLoaded` 前通过 `configure()` 设置。显式 `open()` 成功后才写入打开意图；自动恢复失败或显式打开失败都会清理标记，避免后续页面重复失败。
+
+## JavaScript DOM 注册
+
+接入方不能直接修改原页面 HTML 时，可在目标节点已经存在后调用 `registerRegions()` 或 `registerTabs()`。两个方法都会立即写入现有属性协议；工具已经打开时同步刷新现有区域扫描，尚未打开时则在之后打开时识别。
+
+### 公共类型
+
+```ts
+type RegionCode = 1 | 2 | 3 | 4 | 5 | 6;
+type DomTarget = string | Element;
+
+interface RegistrationHandle {
+  dispose(): void;
+}
+
+interface RegionRegistrationConfig {
+  target: DomTarget;
+  region: RegionCode;
+  label?: string;
+}
+
+interface TabRegistrationItem {
+  tab: DomTarget;
+  panel: DomTarget;
+  region: RegionCode;
+  label?: string;
+  activation?: "automatic" | "manual";
+  triggerEvent?: string | readonly string[];
+}
+```
+
+| `RegionCode` | 区域分类 |
+| --- | --- |
+| `1` | 视窗区 |
+| `2` | 导航区 |
+| `3` | 交互区 |
+| `4` | 服务区 |
+| `5` | 列表区 |
+| `6` | 正文区 |
+
+JavaScript 注册 API 的 `region` 只接受上述数字，不接受英文区域名称。运行时收到其他值时只跳过该项，不影响同一次调用中的有效配置；`debug: true` 时输出明确警告。
+
+### `registerRegions()`
+
+```js
+const contentElement = document.querySelector("#content");
+
+const registration = AccessibilityTool.registerRegions([
+  {
+    target: "#news",
+    region: 1,
+    label: "要闻",
+  },
+  {
+    target: "#main-nav",
+    region: 2,
+    label: "主导航",
+  },
+  {
+    target: contentElement,
+    region: 6,
+    label: "新闻正文",
+  },
+]);
+
+// 注销本次调用，并恢复所有目标节点注册前的属性值。
+registration.dispose();
+```
+
+- 字符串按 `document.querySelectorAll()` 解析，同一选择器匹配的全部现有节点使用同一配置。
+- `Element` 只处理传入节点；断开节点或不属于有效文档的节点会被跳过。
+- `label` 只填写区域自身短名称，例如“要闻”，不要填写“要闻视窗区”或完整提示句。省略时继续使用现有可访问名称和标题回退规则。
+- API 写入数字形式的 `data-a11y-region`，并在提供 `label` 时写入 `data-a11y-label`；分类名称与完整朗读文案仍由现有扫描和导航模块生成。
+
+### `registerTabs()`
+
+```js
+const registration = AccessibilityTool.registerTabs([
+  {
+    tab: ".services-tab-hditem",
+    panel: ".services-tabcut-bdcontent",
+    region: 1,
+  },
+]);
+
+registration.dispose();
+```
+
+- `registerTabs()` 直接接收扁平的选项配置，不需要 `tablist` 或 `items` 包装层。
+- 字符串目标按 `document.querySelectorAll()` 解析。同一项的 tab 与 panel 有效匹配数量相等且大于零时，按各自 DOM 顺序和相同索引一一配对，因此多个组件复用相同类名时也只需配置一次。
+- tab/panel 数量不一致时整项跳过，其他配置继续注册；`debug: true` 时输出包含两侧数量的警告。`Element` 目标仍只表示单个现有节点。
+- 每个 tab 的直接父节点自动获得 `role="tablist"`。同一选择器命中多个组件时，会按不同直接父节点自动拆成多个独立 tablist；每组分别初始化首个选项，键盘移动与选中状态不会影响其他组。工具不猜测更外层祖先。
+- 每对 tab 与 panel 必须位于同一 `Document` 或 Shadow Root；重复 tab、重复 panel、tab/panel 跨角色复用、同一节点自配对，以及自动推断父节点与 tab/panel 的角色冲突，都只跳过冲突配对。仍在生效的注册也参与跨角色校验，相同角色的重叠注册则继续由属性所有权层安全处理。
+- 缺失 ID 时生成同一根节点内不冲突的临时 ID；已有唯一 ID 原样复用。临时 ID 和所有覆盖属性都在注销时恢复。
+- API 自动补充 `tablist` / `tab` / `tabpanel` role、`tabindex`、ARIA 关联与选中状态，并给 tab 和 panel 写入相同的数字区域。注册 tab 上的区域值只作为选项分类元数据，不会把选项重复计为第二个盲道区域。
+- `data-a11y-activation` 与 `data-a11y-trigger-event` 只写在对应 tab 上。省略时沿用当前 `tabs.defaultActivation`、`tabs.triggerEvents` 和最终 `click` 回退规则；多个事件会按现有规则拆分、去重。
+- `label` 是选项短名称覆盖值；省略时使用现有 tab 可访问名称提取逻辑。对应 panel 使用同一短名称和区域分类。
+- 初始非活动普通面板使用 `data-a11y-hidden`；原生 `<dialog>` 的该属性保持原样，并继续使用自身的 `open` / `close()`。注册过程不新增、删除或修改原生 `hidden`。接入页面原有事件与 CSS 仍负责真实视觉显示，工具继续只复用现有 tabs 事件、ARIA、键盘、Alt+下、Esc 和朗读流程。
+
+### 生命周期和动态 DOM 限制
+
+- 每次调用返回独立句柄；`dispose()` 幂等，只注销该次调用。多个注册覆盖同一属性时，释放其中一个不会破坏仍有效的注册。
+- 恢复会区分原本不存在、原本为空字符串和原本具有非空值的属性。
+- `close()` 不注销 DOM 注册，重新打开仍可识别；`destroy()` 会自动释放全部尚未 `dispose()` 的注册并恢复 DOM。
+- 首版只解析调用时已经存在的节点，不保存选择器等待未来节点。SPA 路由或框架重建 DOM 后，接入方需要重新调用相应注册方法。
 
 ## 顶层配置
 

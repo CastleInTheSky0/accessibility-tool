@@ -14,6 +14,8 @@
 ```ts
 interface AccessibilityToolApi {
   configure(config: AccessibilityToolConfig): AccessibilityToolApi;
+  registerRegions(configs: RegionRegistrationConfig[]): RegistrationHandle;
+  registerTabs(configs: TabRegistrationItem[]): RegistrationHandle;
   open(options?: {
     trigger?: HTMLElement;
     config?: AccessibilityToolConfig;
@@ -32,6 +34,28 @@ interface AccessibilityToolApi {
     eventName: K,
     listener: (payload: AccessibilityToolEventMap[K]) => void,
   ): AccessibilityToolApi;
+}
+
+type RegionCode = 1 | 2 | 3 | 4 | 5 | 6;
+type DomTarget = string | Element;
+
+interface RegistrationHandle {
+  dispose(): void;
+}
+
+interface RegionRegistrationConfig {
+  target: DomTarget;
+  region: RegionCode;
+  label?: string;
+}
+
+interface TabRegistrationItem {
+  tab: DomTarget;
+  panel: DomTarget;
+  region: RegionCode;
+  label?: string;
+  activation?: TabActivationMode;
+  triggerEvent?: string | readonly string[];
 }
 
 interface AccessibilityToolConfig {
@@ -110,6 +134,16 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 4/service, 5/list, 6/content
 ```
 
+- Public DOM registration accepts only numeric `RegionCode` values. Invalid runtime values never abort the batch: skip only that item and warn when `debug: true`. Registration always writes the numeric string to `data-a11y-region`.
+- `registerRegions()` resolves selector strings with `document.querySelectorAll()` at call time and applies one configuration to every current match. An `Element` target applies only to that connected node. Missing, invalid, disconnected, or document-less targets are skipped independently. A supplied `label` is a short name written through `data-a11y-label`; an omitted label leaves the scanner's existing accessible-name and heading fallback authoritative.
+- `registerTabs()` accepts a flat `TabRegistrationItem[]`; callers never pass a `tablist` or `items` wrapper. A selector target resolves every current connected HTML-element match in document order, while an `Element` target resolves only that node. Each item requires equal, non-zero valid tab and panel counts and pairs them by the same DOM-order index. A count mismatch skips that whole item with a debug warning without invalidating unrelated items in the same call.
+- Every registered tab's direct parent receives the tablist semantics. Selector matches spanning multiple direct parents are split into independent tablists, each with its own initial selection, keyboard boundary, and selection state; the tool never guesses a higher ancestor. Each tab/panel pair must share one `Document` or Shadow Root. Duplicate tabs, duplicate panels, cross-role node reuse (including an inferred tablist parent reused as a tab or panel), or a tab paired with itself skip only the conflicting pair. Live registrations participate in cross-role conflict checks while same-role overlapping registrations remain supported by layered ownership.
+- Registered tabs and panels receive the standard roles, reversible `tabindex`/ARIA state, numeric region values, and stable ID references. Existing unique IDs are retained; missing IDs are generated uniquely within the relationship root and removed on final disposal. `data-a11y-activation` and `data-a11y-trigger-event` are written only on each tab and use the same defaulting, whitespace splitting, deduplication, and final `click` fallback as the tabs controller.
+- A registered tab carries the same numeric region value as its panel for option metadata, but the scanner excludes only API-registered tabs from region-container results so they do not double the region count or compete with the dedicated tab announcement. Existing manually authored HTML behavior is unchanged. The panel remains the blind-path region target and uses the tab's resolved short name unless `label` overrides both.
+- Registration initializes the same first-selected-tab rule as the tabs controller, synchronizes `aria-selected` / `aria-hidden`, and represents inactive ordinary panels with `data-a11y-hidden`. Native `<dialog>` panels retain their existing `data-a11y-hidden` state and continue to use `open` / `close()`. Registration never adds, removes, or changes native `hidden`. Host events and CSS continue to own visual/business state after activation; the existing tabs controller remains the only keyboard, original-event, Alt+Down, Escape, and speech implementation.
+- Each call owns an independent idempotent `RegistrationHandle`. Attribute ownership is layered on the shared DOM ledger: disposing one call reveals the next active registration for that exact attribute, while disposing the last owner restores missing, empty, or valued originals exactly. `close()` retains registrations; `destroy()` releases every outstanding handle after live controllers relinquish their own ledger entries. Registration changes while open synchronously refresh the existing scanner/tabs pipeline without adding listeners.
+- Selector matching is intentionally one-shot. Future nodes, SPA route configuration, and framework-recreated DOM require a new registration call; the existing mutation scanner is not expanded into a selector subscription system.
+
 - Region source priority is `regions.selectors` > `data-a11y-region` > legacy `aria-role` > semantic detection.
 - Region label priority is `data-a11y-label` > legacy `aria-readlabel` > `aria-label` > `aria-labelledby` > linked tab accessible name for an explicitly classified standard tab panel > first visible heading > category label.
 - `data-a11y-label` and legacy `aria-readlabel` remain integration-provided short names such as `要闻`; integrations do not provide the complete spoken instruction. Every exact region-container focus caused by shortcut/category navigation, Tab, Shift+Tab, pointer, script, or return from a descendant must literally concatenate `label + REGION_LABELS[type]` without trimming, semantic correction, or category deduplication and announce `提示：您已进入<名称与分类>，按下 Tab 键浏览信息；第 N 个，共 M 个`. Controller-owned focus suppresses its synchronous `focusin` duplicate but still announces once. Automatic mutation/reclassification recovery keeps that focus announcement suppressed. Focusing a descendant does not repeat the region instruction, and `RegionChangeEvent.label` remains the unmodified scanner-resolved label.
@@ -146,6 +180,8 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 | Invalid region or dialog selector | Emit `error`, skip only the invalid selector/component, and continue; throw when `strict: true`. |
 | Invalid zoom target selector | Emit `error`, leave page zoom unapplied, and keep the rest of the tool running. |
 | Unknown `data-a11y-region` / legacy value | Ignore the element as an explicit region, report once per value, and continue scanning. |
+| Invalid public registration region, target, selector, tab/panel count mismatch, or conflicting pair | Warn only in debug mode, skip that item or conflicting pair as specified, preserve every other valid item, and never escalate through `strict`. |
+| Registration handle disposed more than once | Treat every call after the first as a no-op. Preserve other live registrations and refresh the open runtime only for the effective first disposal. |
 | Hidden, inert, or `aria-hidden="true"` region | Exclude it from counts and navigation, except an explicitly classified standard tab panel with a unique same-root originating tab; retain that panel in category order but not ordinary Tab order until host activation makes it visible. |
 | Current region removed, hidden, or reclassified | Move to the next same-type region with wraparound; otherwise return focus to the category control. |
 | Region container is the current focused element | Show only the yellow focus outline; the yellow owner overrides the underlying orange region owner. When reading is enabled, announce exactly one complete region-entry instruction. |
@@ -170,9 +206,9 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 
 ### 5. Good / Base / Bad Cases
 
-- Good: a marked region contains native links and buttons; ordinary Tab first shows one yellow outline on the container, and the next Tab produces an orange outer region plus a yellow current descendant, with any host blue focus shadow suppressed. After an explicit open, a same-origin reload silently restores the toolbar without moving the page's current focus.
-- Base: an unmarked semantic page is conservatively detected (`nav`, named `form`, `article`, and explicit main/article ARIA roles), while a native `main` tag alone is not classified as a content region; ordinary page focus gets one yellow outline and the host outline returns after close. With no valid open intent, bundle import remains lazy.
-- Bad: sharing one mutation owner between region context and current focus corrupts restoration; sharing the reading overlay with either state lets speech cleanup erase navigation context; intercepting Tab, auto-tabbing readable tags, overriding author `tabindex`, flattening composite widgets into multiple Tab stops, restoring before final pre-DOMContentLoaded configuration, or focusing/announcing during automatic restoration is forbidden.
+- Good: a marked region contains native links and buttons; ordinary Tab first shows one yellow outline on the container, and the next Tab produces an orange outer region plus a yellow current descendant, with any host blue focus shadow suppressed. A public registration uses numeric regions and explicit tab/panel pairs, enters the same scanner/tabs pipeline exactly once, and restores every owned attribute through its handle. After an explicit open, a same-origin reload silently restores the toolbar without moving the page's current focus.
+- Base: an unmarked semantic page is conservatively detected (`nav`, named `form`, `article`, and explicit main/article ARIA roles), while a native `main` tag alone is not classified as a content region; ordinary page focus gets one yellow outline and the host outline returns after close. A missing registration selector is skipped while valid siblings in the same call still register. With no valid open intent, bundle import remains lazy.
+- Bad: sharing one mutation owner between region context and current focus corrupts restoration; using independent per-handle ledgers corrupts out-of-order registration disposal; copying tabs listeners or guessing a panel relationship creates duplicate behavior. Sharing the reading overlay with either focus state lets speech cleanup erase navigation context; intercepting Tab, auto-tabbing readable tags, overriding author `tabindex`, flattening composite widgets into multiple Tab stops, restoring before final pre-DOMContentLoaded configuration, or focusing/announcing during automatic restoration is forbidden.
 
 ### 6. Tests Required
 
@@ -181,8 +217,10 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 - Unit: successful open/close/destroy/reset intent lifecycle, disabled persistence, storage-key migration, failed-open cleanup, silent final-config restoration, and explicit-open/close races with pending restoration.
 - Unit: accessible-name empty-value fallback and fixed priority, target-contained versus unrelated selections, area/image-input `alt`, unnamed ARIA select current-option fallback, native/equivalent-ARIA semantic prefixes including `输入框：`, generic `文本：` output, `aria-current="false"`, control state text, hidden content, and Shadow Root `aria-labelledby`.
 - Unit: region source priority, numeric/English/legacy mapping, semantic-off mode, explicitly classified visible/hidden tab panels and source-tab name fallback in ordinary DOM/open Shadow Roots/same-origin iframes, safe history restoration, current-region wrap and reclassification recovery.
+- Unit: public region registration covers codes 1-6, selector/Element targets, multi-match selectors, invalid-item isolation, labels entering the existing scanner/navigation speech, before/after-open refresh, overlapping handles, idempotent disposal, exact attribute restoration, and destroy cleanup.
 - Unit: every visible recognized region receives a reversible Tab anchor; shortcut and ordinary/reverse/programmatic container focus announce the same instruction once; listener-order-independent reading coordination skips the container but reads descendants; reading overlay, active-region owner, and current-focus owner remain independent; region focus is yellow, descendant focus restores the region to orange, host box shadows stay suppressed while owned, and all values/priorities restore exactly.
 - Unit: exact tab/link/no-region speech templates; every-focus announcements without selection states; scanned category lookup across ordinary DOM, open Shadow Roots, and same-origin iframe documents; listener-order-independent generic-reading suppression; per-option automatic/manual activation; trigger-event fallback/deduplication; shared/timeout-safe host activation for hidden panel regions; stale region-navigation suppression; host-owned `data-a11y-hidden` panels without native `hidden`; focusable/static panel entry using the panel's own category; host-driven intermediate focus during entry/exit; normal descendant reading after entry; concurrent-operation deduplication; successful and failed Escape return; and non-modal dialog focus behavior.
+- Unit: public tab registration covers the flat signature, selector multi-match DOM-order pairing, count-mismatch isolation, direct-parent tablist inference and cross-parent splitting, conflicting-pair isolation, generated/reused IDs, per-tab behavior attributes, shared tab/panel region/name metadata, `data-a11y-hidden` without native `hidden` mutation, layered overlapping disposal, and destroy cleanup.
 - Unit: interrupted speech must not emit stale errors.
 - Unit: hidden features must be consistent between main and read-screen toolbars.
 - Unit: the brand rail stays `aria-hidden` and outside toolbar navigation; read-screen controls keep their exact order, region counts remain independent from `ALT + 1` through `ALT + 6` metadata, `screenSound` uses the `朗读` name/status, and active read-screen mode exposes `当前模式`.
@@ -200,6 +238,7 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 - E2E: Tab, Shift+Tab, pointer, and script focus use one yellow real-node outline; host outline and blue focus-shadow treatments are overridden only while owned and restore across close/destroy/reopen.
 - E2E: ordinary Tab reaches recognized region containers before their descendants; category selection uses the same anchors; native Tab shows orange region context plus yellow descendant focus; Shift+Tab returns through the region anchor; dynamic invalidation and close/destroy restore all temporary tab stops.
 - E2E: Tab, Shift+Tab, arrow, script, Alt+ArrowDown, and Escape produce the exact single tab/panel/return live message; static panels gain no descendant tab stops; ordinary DOM, open Shadow Roots, and same-origin iframe tabs use their scanned region category.
+- E2E: public registrations made before and after open immediately enter native region navigation; selector multi-match and Element targets restore through their own handles. Dynamically registered paired tabs use the existing Tab/Shift+Tab, original-event, Alt+Down, Escape, and hidden-panel region-shortcut pipeline exactly once, while overlapping handles preserve generated IDs and region counts until the final disposal.
 - E2E: open Shadow Roots, same-origin iframes, strict CSP, scroll/resize, and forced-colors preserve direct-node outline ownership without focus/region geometry overlays.
 - E2E: hostile CSS isolation, strict CSP external styles, closed production Shadow Root, semantic-off configuration, and no new serious/critical axe violations.
 - E2E: Chrome and Edge create a visible 2000-node fixture before opening the tool, parse the first debug scan diagnostic, assert at least 50 recognized regions, and require the measured initial scan to be `<= 100ms`. Firefox and WebKit skip this timing assertion while retaining the full functional scanner suite.
@@ -226,6 +265,18 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 ```
 
 ```js
+// Invalid region names and ambiguous selectors cannot define the public
+// registration relationship.
+AccessibilityTool.registerRegions([
+  { target: "#news", region: "viewport" },
+]);
+AccessibilityTool.registerTabs([
+  {
+    tablist: "#news-tabs",
+    items: [{ tab: ".tab", panel: ".panel", region: 1 }],
+  },
+]);
+
 // Creates site-specific behavior outside the singleton/config contract.
 document.querySelector(".toolbar").style.cssText = customCss;
 ```
@@ -303,9 +354,26 @@ AccessibilityTool.configure({
   },
 });
 
+const registration = AccessibilityTool.registerTabs([
+  {
+    tab: ".services-tab-hditem",
+    panel: ".services-tabcut-bdcontent",
+    region: 1,
+    triggerEvent: "click",
+  },
+  {
+    tab: "#news-tab",
+    panel: "#news-panel",
+    region: 1,
+    triggerEvent: "click",
+  },
+]);
+
 launcher.addEventListener("click", () => {
   void AccessibilityTool.open({ trigger: launcher });
 });
+
+registration.dispose();
 ```
 
 ```scss

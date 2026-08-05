@@ -6,6 +6,9 @@ export type RegionType =
   | "list"
   | "content";
 
+export type RegionCode = 1 | 2 | 3 | 4 | 5 | 6;
+export type DomTarget = string | Element;
+
 export type ColorScheme =
   | "original"
   | "white-black"
@@ -15,6 +18,25 @@ export type ColorScheme =
 
 export type ToolbarLayoutMode = "push" | "overlay";
 export type TabActivationMode = "automatic" | "manual";
+
+export interface RegistrationHandle {
+  dispose(): void;
+}
+
+export interface RegionRegistrationConfig {
+  target: DomTarget;
+  region: RegionCode;
+  label?: string;
+}
+
+export interface TabRegistrationItem {
+  tab: DomTarget;
+  panel: DomTarget;
+  region: RegionCode;
+  label?: string;
+  activation?: TabActivationMode;
+  triggerEvent?: string | readonly string[];
+}
 
 export type FeatureId =
   | "reading"
@@ -168,6 +190,10 @@ export interface AccessibilityToolEventMap {
 
 export interface AccessibilityToolApi {
   configure(config: AccessibilityToolConfig): AccessibilityToolApi;
+  registerRegions(
+    configs: RegionRegistrationConfig[],
+  ): RegistrationHandle;
+  registerTabs(configs: TabRegistrationItem[]): RegistrationHandle;
   open(options?: AccessibilityToolOpenOptions): Promise<AccessibilityToolApi>;
   close(): Promise<AccessibilityToolApi>;
   toggle(options?: AccessibilityToolOpenOptions): Promise<AccessibilityToolApi>;
