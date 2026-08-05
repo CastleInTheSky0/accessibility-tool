@@ -41,6 +41,7 @@ export interface TabRegistrationItem {
 export type FeatureId =
   | "reading"
   | "speechRate"
+  | "voiceSelection"
   | "colorScheme"
   | "zoomIn"
   | "zoomOut"
@@ -221,6 +222,13 @@ export interface PersistedPreferences {
   isPinned: boolean;
   isReadScreen: boolean;
   preferredLanguage?: string;
+  voice?: PersistedVoicePreference;
+}
+
+export interface PersistedVoicePreference {
+  voiceURI: string;
+  name: string;
+  lang: string;
 }
 
 declare global {

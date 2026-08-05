@@ -23,10 +23,20 @@ import { normalizeLanguageTag } from "./features/language";
 import { ReadingController } from "./features/reading";
 import { RegionNavigationController } from "./features/region-navigation";
 import { RegionScanner } from "./features/regions";
-import { SpeechController } from "./features/speech";
+import {
+  BrowserSpeechAdapter,
+  SpeechController,
+} from "./features/speech";
 import { TabsController } from "./features/tabs";
+import {
+  createBrowserLocalVoiceRuntime,
+  type BrowserNativeVoiceResolver,
+  type VoiceCatalogProvider,
+  type VoiceRuntimeCapability,
+} from "./features/voice-selection";
 import { StyleManager } from "./ui/style-manager";
 import { ToolbarUI, type ToolbarAction } from "./ui/toolbar";
+import type { VoiceSettingsModel } from "./ui/voice-settings";
 import type {
   AccessibilityToolApi,
   AccessibilityToolConfig,
@@ -34,6 +44,7 @@ import type {
   AccessibilityToolOpenOptions,
   AccessibilityToolState,
   PersistedPreferences,
+  PersistedVoicePreference,
   RegionRegistrationConfig,
   RegistrationHandle,
   RegionType,
@@ -76,6 +87,11 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
   private styles: StyleManager | null = null;
   private ui: ToolbarUI | null = null;
   private speech: SpeechController | null = null;
+  private voiceCatalog: VoiceCatalogProvider | null = null;
+  private nativeVoiceResolver: BrowserNativeVoiceResolver | null = null;
+  private runtimeSpeechAdapterMode: "browser-local" | "custom-adapter" | null =
+    null;
+  private unsubscribeVoiceCatalog: (() => void) | null = null;
   private effects: PageEffectsController | null = null;
   private reading: ReadingController | null = null;
   private scanner: RegionScanner | null = null;
@@ -83,13 +99,20 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
   private tabs: TabsController | null = null;
   private tabsStarted = false;
   private preferredLanguage: string | null = null;
+  private voicePreference: PersistedVoicePreference | null = null;
+  private cancelVoicePreviewRequest: (() => void) | null = null;
+  private voicePreviewActive = false;
+  private voicePreviewToken = 0;
   private suppressFullscreenAnnouncement = false;
   private openOperation: Promise<AccessibilityToolApi> | null = null;
   private openOperationMode: OpenMode | null = null;
   private autoRestoreSettled = false;
   private silentlyRestored = false;
 
-  constructor() {
+  constructor(
+    private readonly createVoiceRuntime: () => VoiceRuntimeCapability =
+      createBrowserLocalVoiceRuntime,
+  ) {
     if (typeof document !== "undefined") {
       void this.restoreOpenStateWhenReady();
     }
@@ -243,6 +266,8 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
     const stored = this.getStore().load();
     this.preferredLanguage =
       normalizeLanguageTag(stored?.preferredLanguage) ?? null;
+    this.voicePreference = stored?.voice ? { ...stored.voice } : null;
+    this.voiceCatalog?.start();
     this.state = constrainStateToFeatures(
       this.activeConfig,
       hydrateState(this.activeConfig, stored),
@@ -254,6 +279,7 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
 
     this.ui?.show();
     this.ui?.updateState(this.state);
+    this.updateVoiceSettings();
     this.updateAvailability();
     this.effects?.start();
     this.effects?.apply(this.state);
@@ -301,8 +327,11 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
   }
 
   async reset(): Promise<AccessibilityToolApi> {
+    this.ui?.closeVoiceSettings();
+    this.cancelVoicePreview();
     this.getStore().clear();
     this.preferredLanguage = null;
+    this.voicePreference = null;
     if (!this.state.isOpen) {
       this.state = createDefaultState(this.activeConfig);
       return this;
@@ -352,6 +381,8 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
     this.sessionConfig = undefined;
     this.activeConfig = this.baseConfig;
     this.state = createDefaultState(this.activeConfig);
+    this.preferredLanguage = null;
+    this.voicePreference = null;
     this.silentlyRestored = false;
   }
 
@@ -489,9 +520,33 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
         this.effects?.clearFocusHighlight();
         this.regionNavigation?.clearActiveRegion();
       },
+      onVoiceLanguageChange: (language) =>
+        this.setPreferredLanguage(language),
+      onVoiceChange: (voice) => this.setVoicePreference(voice),
+      onVoicePreview: () => this.previewVoice(),
+      onVoiceClear: () => this.clearVoicePreferences(),
+      onVoiceSettingsClose: () => this.cancelVoicePreview(),
     });
+    const configuredSpeechAdapter = this.activeConfig.speech.adapter;
+    this.runtimeSpeechAdapterMode = configuredSpeechAdapter
+      ? "custom-adapter"
+      : "browser-local";
+    if (!configuredSpeechAdapter) {
+      const voiceRuntime = this.createVoiceRuntime();
+      this.voiceCatalog = voiceRuntime.catalog;
+      this.nativeVoiceResolver = voiceRuntime.nativeVoiceResolver;
+      this.unsubscribeVoiceCatalog = this.voiceCatalog.subscribe(() =>
+        this.updateVoiceSettings(),
+      );
+    }
     this.speech = new SpeechController(
-      this.activeConfig.speech.adapter,
+      configuredSpeechAdapter ??
+        new BrowserSpeechAdapter((language) =>
+          this.nativeVoiceResolver?.resolveNativeVoice(
+            this.voicePreference,
+            language,
+          ) ?? null,
+        ),
       this.emitter,
     );
     this.effects = new PageEffectsController(this.activeConfig, this.ui, {
@@ -583,6 +638,10 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
   }
 
   private teardownRuntimeNodes(): void {
+    this.cancelVoicePreview();
+    this.unsubscribeVoiceCatalog?.();
+    this.unsubscribeVoiceCatalog = null;
+    this.voiceCatalog?.stop();
     this.scanner?.stop();
     this.tabs?.stop();
     this.regionNavigation?.stop();
@@ -598,6 +657,9 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
     this.styles = null;
     this.ui = null;
     this.speech = null;
+    this.voiceCatalog = null;
+    this.nativeVoiceResolver = null;
+    this.runtimeSpeechAdapterMode = null;
     this.effects = null;
     this.reading = null;
     this.scanner = null;
@@ -614,13 +676,17 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
     this.scanner?.updateConfig(this.activeConfig);
     this.tabs?.updateConfig(this.activeConfig);
     this.updateAvailability();
+    this.updateVoiceSettings();
   }
 
   private async closeInternal(returnFocus: boolean): Promise<void> {
     if (!this.state.isOpen) {
       return;
     }
+    this.ui?.closeVoiceSettings();
+    this.cancelVoicePreview();
     this.savePreferences();
+    this.voiceCatalog?.stop();
     this.reading?.stop();
     this.speech?.cancel();
     this.scanner?.stop();
@@ -671,6 +737,9 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
         break;
       case "speechRate":
         this.cycleSpeechRate();
+        break;
+      case "voiceSelection":
+        this.ui?.toggleVoiceSettings();
         break;
       case "colorScheme":
         this.cycleColorScheme();
@@ -841,6 +910,204 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
       this.effects?.isFullscreenSupported() ?? false,
       "当前浏览器不支持全屏功能",
     );
+    this.updateVoiceSettings();
+  }
+
+  private setPreferredLanguage(language: string | null): void {
+    const normalized = normalizeLanguageTag(language);
+    if (this.preferredLanguage === normalized) {
+      return;
+    }
+    this.cancelVoicePreview();
+    this.preferredLanguage = normalized;
+    this.savePreferences();
+    this.updateVoiceSettings();
+    this.announce(
+      normalized ? `默认语言已设为 ${normalized}` : "已恢复自动语言检测",
+      false,
+    );
+  }
+
+  private setVoicePreference(
+    voice: PersistedVoicePreference | null,
+  ): void {
+    this.cancelVoicePreview();
+    const language = normalizeLanguageTag(voice?.lang);
+    this.voicePreference =
+      voice && language
+        ? {
+            voiceURI: voice.voiceURI.trim(),
+            name: voice.name.trim(),
+            lang: language,
+          }
+        : null;
+    this.savePreferences();
+    this.updateVoiceSettings();
+    this.announce(
+      this.voicePreference
+        ? `已选择本地音色 ${this.voicePreference.name}`
+        : "音色已设为自动选择",
+      false,
+    );
+  }
+
+  private clearVoicePreferences(): void {
+    this.cancelVoicePreview();
+    this.preferredLanguage = null;
+    this.voicePreference = null;
+    this.savePreferences();
+    this.updateVoiceSettings();
+    this.announce("已清除语音偏好", false);
+  }
+
+  private previewVoice(): void {
+    const model = this.createVoiceSettingsModel();
+    if (!model.previewEnabled || !this.speech) {
+      this.announce(model.statusMessage || "当前没有可试听的本地音色", false);
+      return;
+    }
+    this.cancelVoicePreview();
+    const token = ++this.voicePreviewToken;
+    let finished = false;
+    const finish = (): void => {
+      if (finished || token !== this.voicePreviewToken) {
+        return;
+      }
+      finished = true;
+      this.cancelVoicePreviewRequest = null;
+      this.voicePreviewActive = false;
+      this.updateVoiceSettings();
+    };
+    this.voicePreviewActive = true;
+    this.updateVoiceSettings();
+    const cancel = this.speech.speak(
+      getVoicePreviewText(model.effectiveLanguage),
+      model.effectiveLanguage,
+      this.state.speechRate,
+      {
+        onEnd: finish,
+        onError: finish,
+        onCancel: finish,
+      },
+    );
+    if (!finished && token === this.voicePreviewToken) {
+      this.cancelVoicePreviewRequest = cancel;
+    }
+    if (!cancel) {
+      finish();
+    }
+  }
+
+  private cancelVoicePreview(): void {
+    const cancel = this.cancelVoicePreviewRequest;
+    const wasActive = this.voicePreviewActive;
+    this.voicePreviewToken += 1;
+    this.cancelVoicePreviewRequest = null;
+    this.voicePreviewActive = false;
+    cancel?.();
+    if (wasActive) {
+      this.updateVoiceSettings();
+    }
+  }
+
+  private updateVoiceSettings(): void {
+    this.ui?.updateVoiceSettings(this.createVoiceSettingsModel());
+  }
+
+  private createVoiceSettingsModel(): VoiceSettingsModel {
+    const effectiveLanguage =
+      this.preferredLanguage ??
+      normalizeLanguageTag(this.activeConfig.locale) ??
+      DEFAULT_CONFIG.locale;
+    const hasPreferences = Boolean(
+      this.preferredLanguage || this.voicePreference,
+    );
+    if (this.runtimeSpeechAdapterMode === "custom-adapter") {
+      return {
+        availability: "custom-adapter",
+        catalogStatus: "unsupported",
+        preferredLanguage: this.preferredLanguage,
+        effectiveLanguage,
+        availableLanguages: [],
+        voices: [],
+        selectedVoiceId: null,
+        summary: "自定义语音",
+        statusMessage:
+          "当前站点使用自定义语音适配器，浏览器本地音色设置不可用。",
+        hasPreferences,
+        previewEnabled: false,
+        isPreviewing: false,
+      };
+    }
+    const snapshot = this.voiceCatalog?.getSnapshot() ?? {
+      capability: {
+        providerId: "browser-local",
+        localOnly: true,
+        supportsPreview: true,
+      },
+      status: "unsupported" as const,
+      voices: [],
+    };
+    const availableLanguages = Array.from(
+      new Set(snapshot.voices.map(({ lang }) => lang)),
+    ).sort((left, right) => left.localeCompare(right));
+    if (!this.speech?.isSupported() || snapshot.status === "unsupported") {
+      return {
+        availability: "unsupported",
+        catalogStatus: "unsupported",
+        preferredLanguage: this.preferredLanguage,
+        effectiveLanguage,
+        availableLanguages,
+        voices: [],
+        selectedVoiceId: null,
+        summary: "不可用",
+        statusMessage: "当前浏览器不支持本地语音合成或音色目录。",
+        hasPreferences,
+        previewEnabled: false,
+        isPreviewing: false,
+      };
+    }
+    const voices =
+      this.voiceCatalog?.getCompatibleVoices(effectiveLanguage) ?? [];
+    const selectedVoice =
+      this.voiceCatalog?.resolvePreference(
+        this.voicePreference,
+        effectiveLanguage,
+      ) ?? null;
+    const resolvedVoice =
+      snapshot.status === "ready"
+        ? this.nativeVoiceResolver?.resolveNativeVoice(
+            this.voicePreference,
+            effectiveLanguage,
+          ) ?? null
+        : null;
+    let statusMessage: string;
+    if (snapshot.status === "loading") {
+      statusMessage = "正在载入浏览器或系统提供的本地音色…";
+    } else if (voices.length === 0) {
+      statusMessage = `没有找到与 ${effectiveLanguage} 兼容的本地音色。`;
+    } else if (this.voicePreference && !selectedVoice) {
+      statusMessage =
+        "已保存的音色当前不可用，朗读将安全回退到兼容默认音色。";
+    } else if (!resolvedVoice && !selectedVoice) {
+      statusMessage = `已找到 ${voices.length} 个兼容本地音色；请选择一个音色后试听。`;
+    } else {
+      statusMessage = `已找到 ${voices.length} 个兼容本地音色。`;
+    }
+    return {
+      availability: "browser-local",
+      catalogStatus: snapshot.status,
+      preferredLanguage: this.preferredLanguage,
+      effectiveLanguage,
+      availableLanguages,
+      voices,
+      selectedVoiceId: selectedVoice?.id ?? null,
+      summary: selectedVoice?.name ?? "自动选择",
+      statusMessage,
+      hasPreferences,
+      previewEnabled: snapshot.status === "ready" && Boolean(resolvedVoice),
+      isPreviewing: this.voicePreviewActive,
+    };
   }
 
   private announce(message: string, synthesize = true): void {
@@ -954,6 +1221,7 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
       ...(this.preferredLanguage
         ? { preferredLanguage: this.preferredLanguage }
         : {}),
+      ...(this.voicePreference ? { voice: { ...this.voicePreference } } : {}),
     };
     this.getStore().save(preferences);
   }
@@ -1122,6 +1390,20 @@ function clamp(value: number, min: number, max: number): number {
 
 function formatNumber(value: number): string {
   return Number(value.toFixed(2)).toString();
+}
+
+function getVoicePreviewText(language: string): string {
+  switch (language.split("-", 1)[0]?.toLowerCase()) {
+    case "en":
+      return "Hello, this is a preview of the selected local voice.";
+    case "ja":
+      return "こんにちは。選択したローカル音声の試聴です。";
+    case "ko":
+      return "안녕하세요. 선택한 로컬 음성 미리 듣기입니다.";
+    case "zh":
+    default:
+      return "您好，这是当前所选本地音色的试听。";
+  }
 }
 
 async function ensureDocumentReady(): Promise<void> {

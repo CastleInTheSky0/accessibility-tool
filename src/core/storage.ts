@@ -1,5 +1,9 @@
 import { COLOR_SCHEMES } from "./constants";
-import type { ColorScheme, PersistedPreferences } from "../types";
+import type {
+  ColorScheme,
+  PersistedPreferences,
+  PersistedVoicePreference,
+} from "../types";
 
 interface StoredPayload {
   version: number;
@@ -20,6 +24,29 @@ const isFiniteNumber = (value: unknown): value is number =>
 const isColorScheme = (value: unknown): value is ColorScheme =>
   typeof value === "string" &&
   (COLOR_SCHEMES as readonly string[]).includes(value);
+
+function parseVoicePreference(
+  value: unknown,
+): PersistedVoicePreference | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const candidate = value as Partial<PersistedVoicePreference>;
+  if (
+    typeof candidate.voiceURI !== "string" ||
+    typeof candidate.name !== "string" ||
+    !candidate.name.trim() ||
+    typeof candidate.lang !== "string" ||
+    !candidate.lang.trim()
+  ) {
+    return null;
+  }
+  return {
+    voiceURI: candidate.voiceURI.trim(),
+    name: candidate.name.trim(),
+    lang: candidate.lang.trim(),
+  };
+}
 
 function parsePreferences(value: unknown): PersistedPreferences | null {
   if (!value || typeof value !== "object") {
@@ -56,6 +83,10 @@ function parsePreferences(value: unknown): PersistedPreferences | null {
   ) {
     parsed.preferredLanguage = candidate.preferredLanguage.trim();
   }
+  const voice = parseVoicePreference(candidate.voice);
+  if (voice) {
+    parsed.voice = voice;
+  }
   return parsed;
 }
 
@@ -84,7 +115,7 @@ export class PreferenceStore {
   }
 
   save(preferences: PersistedPreferences): void {
-    this.memory = { ...preferences };
+    this.memory = clonePreferences(preferences);
     try {
       const payload: StoredPayload = {
         version: this.version,
@@ -104,6 +135,15 @@ export class PreferenceStore {
       // Storage may be unavailable; memory is already cleared.
     }
   }
+}
+
+function clonePreferences(
+  preferences: PersistedPreferences,
+): PersistedPreferences {
+  return {
+    ...preferences,
+    ...(preferences.voice ? { voice: { ...preferences.voice } } : {}),
+  };
 }
 
 export function deriveOpenStateStorageKey(storageKey: string): string {

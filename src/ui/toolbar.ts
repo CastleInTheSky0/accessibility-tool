@@ -6,12 +6,17 @@ import {
 } from "../core/constants";
 import type { ResolvedAccessibilityToolConfig } from "../core/config";
 import { isHTMLElement } from "../core/dom";
+import {
+  VoiceSettingsUI,
+  type VoiceSettingsModel,
+} from "./voice-settings";
 import type {
   AccessibilityToolState,
   ColorScheme,
   FeatureId,
   RegionChangeEvent,
   RegionType,
+  PersistedVoicePreference,
 } from "../types";
 
 export type ToolbarAction = FeatureId | `region:${RegionType}` | "screenSound";
@@ -20,11 +25,17 @@ interface ToolbarCallbacks {
   onAction: (action: ToolbarAction, control: HTMLElement) => void;
   onCollapsedChange: (collapsed: boolean) => void;
   onFocusInside?: () => void;
+  onVoiceLanguageChange?: (language: string | null) => void;
+  onVoiceChange?: (voice: PersistedVoicePreference | null) => void;
+  onVoicePreview?: () => void;
+  onVoiceClear?: () => void;
+  onVoiceSettingsClose?: () => void;
 }
 
 const FEATURE_LABELS: Readonly<Record<FeatureId, string>> = {
   reading: "朗读",
   speechRate: "语速",
+  voiceSelection: "音色",
   colorScheme: "配色",
   zoomIn: "放大",
   zoomOut: "缩小",
@@ -92,6 +103,9 @@ const TOGGLE_ICONS = {
 const ICONS: Readonly<Record<string, string>> = {
   reading: TOGGLE_ICONS.sound.off,
   speechRate: renderSpeechRateIcon(1),
+  voiceSelection: createSvgIcon(
+    '<path d="M4 12h2M8 8v8M12 5v14M16 8v8M20 11v2"/><path class="a11y-icon__muted" d="M4 5h16"/>',
+  ),
   colorScheme: renderColorSchemeIcon("original"),
   zoomIn: createSvgIcon(
     '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5M10.5 7.5v6M7.5 10.5h6"/>',
@@ -155,6 +169,7 @@ export class ToolbarUI {
   private readonly horizontalLine: HTMLDivElement;
   private readonly verticalLine: HTMLDivElement;
   private readonly highlight: HTMLDivElement;
+  private readonly voiceSettings: VoiceSettingsUI;
   private readonly controls = new Map<ToolbarAction, HTMLElement>();
   private regionCounts: Record<RegionType, number> = {
     viewport: 0,
@@ -169,6 +184,7 @@ export class ToolbarUI {
     "type" | "index" | "count"
   > | null = null;
   private state: AccessibilityToolState | null = null;
+  private voiceSettingsModel: VoiceSettingsModel | null = null;
   private config: ResolvedAccessibilityToolConfig;
   private collapseTimer: number | null = null;
 
@@ -237,6 +253,18 @@ export class ToolbarUI {
       this.verticalLine,
       this.highlight,
     );
+    this.voiceSettings = new VoiceSettingsUI(
+      this.root,
+      `${host.id}-voice-settings`,
+      {
+        onLanguageChange: (language) =>
+          this.callbacks.onVoiceLanguageChange?.(language),
+        onVoiceChange: (voice) => this.callbacks.onVoiceChange?.(voice),
+        onPreview: () => this.callbacks.onVoicePreview?.(),
+        onClear: () => this.callbacks.onVoiceClear?.(),
+        onClose: () => this.callbacks.onVoiceSettingsClose?.(),
+      },
+    );
     shadowRoot.append(this.root);
 
     this.bindEvents();
@@ -267,6 +295,7 @@ export class ToolbarUI {
 
   hide(): void {
     this.cancelCollapse();
+    this.voiceSettings.close({ notify: true });
     this.setCurrentRegion(null);
     this.hideCrosshair();
     this.hideHighlight();
@@ -276,6 +305,7 @@ export class ToolbarUI {
 
   destroy(): void {
     this.cancelCollapse();
+    this.voiceSettings.destroy();
     this.root.remove();
   }
 
@@ -290,6 +320,9 @@ export class ToolbarUI {
     this.root.toggleAttribute("data-read-screen", state.isReadScreen);
     this.mainGroup.hidden = state.isReadScreen;
     this.screenGroup.hidden = !state.isReadScreen;
+    if (state.isReadScreen) {
+      this.voiceSettings.close({ notify: true });
+    }
 
     for (const feature of MAIN_FEATURE_ORDER) {
       for (const control of this.findControls(feature)) {
@@ -324,6 +357,25 @@ export class ToolbarUI {
     if (!state.isPinned) {
       this.setCollapsed(false);
     }
+  }
+
+  updateVoiceSettings(model: VoiceSettingsModel): void {
+    this.voiceSettingsModel = model;
+    this.voiceSettings.update(model);
+    for (const control of this.findControls("voiceSelection")) {
+      this.updateVoiceFeatureMeta(control);
+    }
+  }
+
+  toggleVoiceSettings(): void {
+    const control = this.findVisibleControl("voiceSelection");
+    if (control) {
+      this.voiceSettings.toggle(control);
+    }
+  }
+
+  closeVoiceSettings(returnFocus = false): void {
+    this.voiceSettings.close({ returnFocus, notify: true });
   }
 
   setRegionCounts(counts: Readonly<Record<RegionType, number>>): void {
@@ -415,6 +467,9 @@ export class ToolbarUI {
     const current = this.host.hasAttribute("data-a11y-tool-collapsed");
     if (current === collapsed) {
       return;
+    }
+    if (collapsed) {
+      this.voiceSettings.close({ notify: true });
     }
     this.host.toggleAttribute("data-a11y-tool-collapsed", collapsed);
     this.revealButton.tabIndex = collapsed ? 0 : -1;
@@ -570,6 +625,14 @@ export class ToolbarUI {
     }
     if (SWITCH_FEATURES.has(action as FeatureId) || action === "screenSound") {
       control.setAttribute("aria-pressed", "false");
+    }
+    if (action === "voiceSelection") {
+      control.setAttribute("aria-haspopup", "dialog");
+      control.setAttribute("aria-expanded", "false");
+      control.setAttribute(
+        "aria-controls",
+        `${this.host.id}-voice-settings`,
+      );
     }
     const labelMarkup = regionType
       ? [
@@ -774,6 +837,9 @@ export class ToolbarUI {
         meta.textContent = `${formatRate(state.speechRate)}×`;
         control.setAttribute("aria-label", `语速，当前 ${formatRate(state.speechRate)} 倍`);
         break;
+      case "voiceSelection":
+        this.updateVoiceFeatureMeta(control);
+        break;
       case "colorScheme":
         meta.textContent = COLOR_SCHEME_LABELS[state.colorScheme].replace("配色", "");
         control.setAttribute(
@@ -863,6 +929,15 @@ export class ToolbarUI {
         link.href = this.config.toolbar.helpUrl;
       }
     }
+  }
+
+  private updateVoiceFeatureMeta(control: HTMLElement): void {
+    const summary = this.voiceSettingsModel?.summary ?? "自动选择";
+    const meta = control.querySelector<HTMLElement>("[data-control-meta]");
+    if (meta) {
+      meta.textContent = summary;
+    }
+    control.setAttribute("aria-label", `音色，当前${summary}，打开语音设置`);
   }
 
   private createOverlay(className: string): HTMLDivElement {

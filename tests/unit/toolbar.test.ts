@@ -9,6 +9,299 @@ import type {
 } from "../../src/types";
 
 describe("ToolbarUI", () => {
+  it("renders the confirmed 14-control main order and an independent voice dialog trigger", () => {
+    const { host, shadow, ui } = createToolbar();
+    ui.updateState(defaultState);
+
+    const actions = Array.from(
+      shadow.querySelectorAll<HTMLElement>(
+        '[data-mode="main"] [data-toolbar-item]',
+      ),
+    ).map((control) => control.dataset.action);
+    expect(actions).toEqual([
+      "reading",
+      "speechRate",
+      "voiceSelection",
+      "colorScheme",
+      "zoomIn",
+      "zoomOut",
+      "largeCursor",
+      "crosshair",
+      "fullscreen",
+      "pin",
+      "reset",
+      "help",
+      "readScreen",
+      "exit",
+    ]);
+
+    const voice = getControl(shadow, "voiceSelection");
+    expect(voice.getAttribute("aria-haspopup")).toBe("dialog");
+    expect(voice.getAttribute("aria-expanded")).toBe("false");
+    expect(voice.getAttribute("aria-controls")).toBe(`${host.id}-voice-settings`);
+    expect(shadow.querySelector(`#${host.id}-voice-settings`)?.getAttribute("role"))
+      .toBe("dialog");
+    expect(voice.hasAttribute("aria-pressed")).toBe(false);
+
+    ui.destroy();
+    host.remove();
+  });
+
+  it("operates the non-modal voice dialog and returns focus on Escape", () => {
+    const onLanguageChange = vi.fn();
+    const onVoiceChange = vi.fn();
+    const onVoicePreview = vi.fn();
+    const onVoiceClear = vi.fn();
+    const onVoiceSettingsClose = vi.fn();
+    const { host, shadow, ui } = createToolbar(
+      mergeConfig(DEFAULT_CONFIG),
+      vi.fn(),
+      {
+        onVoiceLanguageChange: onLanguageChange,
+        onVoiceChange,
+        onVoicePreview,
+        onVoiceClear,
+        onVoiceSettingsClose,
+      },
+    );
+    ui.updateState(defaultState);
+    ui.updateVoiceSettings({
+      availability: "browser-local",
+      catalogStatus: "ready",
+      preferredLanguage: "zh-CN",
+      effectiveLanguage: "zh-CN",
+      availableLanguages: ["fr-FR", "de-DE", "zh-CN", "fr-FR"],
+      voices: [
+        {
+          id: "uri:local:woman",
+          voiceURI: "local:woman",
+          name: "本地女声",
+          lang: "zh-CN",
+          isDefault: false,
+        },
+      ],
+      selectedVoiceId: "uri:local:woman",
+      summary: "本地女声",
+      statusMessage: "已找到 1 个兼容本地音色。",
+      hasPreferences: true,
+      previewEnabled: true,
+      isPreviewing: false,
+    });
+
+    const trigger = getControl(shadow, "voiceSelection");
+    ui.toggleVoiceSettings();
+    const dialog = shadow.querySelector<HTMLElement>(".a11y-voice-settings");
+    const language = dialog?.querySelector<HTMLSelectElement>("select");
+    expect(dialog?.hidden).toBe(false);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(shadow.activeElement).toBe(language);
+    expect(trigger.querySelector("[data-control-meta]")?.textContent).toBe(
+      "本地女声",
+    );
+    expect(
+      Array.from(language?.options ?? []).map((option) => option.value),
+    ).toEqual([
+      "",
+      "zh-CN",
+      "zh-TW",
+      "en-US",
+      "ja-JP",
+      "ko-KR",
+      "de-DE",
+      "fr-FR",
+    ]);
+
+    if (!language) {
+      throw new Error("Missing voice language selector");
+    }
+    language.value = "en-US";
+    language.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(onLanguageChange).toHaveBeenCalledWith("en-US");
+
+    const selected = dialog?.querySelector<HTMLInputElement>(
+      'input[type="radio"][value="uri:local:woman"]',
+    );
+    selected?.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(onVoiceChange).toHaveBeenCalledWith({
+      voiceURI: "local:woman",
+      name: "本地女声",
+      lang: "zh-CN",
+    });
+    dialog?.querySelector<HTMLButtonElement>(
+      ".a11y-voice-settings__button--primary",
+    )?.click();
+    dialog?.querySelector<HTMLButtonElement>(
+      ".a11y-voice-settings__button--secondary",
+    )?.click();
+    expect(onVoicePreview).toHaveBeenCalledTimes(1);
+    expect(onVoiceClear).toHaveBeenCalledTimes(1);
+
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+    expect(dialog?.hidden).toBe(true);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(shadow.activeElement).toBe(trigger);
+    expect(onVoiceSettingsClose).toHaveBeenCalledTimes(1);
+
+    ui.destroy();
+    host.remove();
+  });
+
+  it("keeps closed-shadow dialog interactions open and dismisses outside it", () => {
+    const onVoicePreview = vi.fn();
+    const onVoiceSettingsClose = vi.fn();
+    const { host, shadow, ui } = createToolbar(
+      mergeConfig(DEFAULT_CONFIG),
+      vi.fn(),
+      { onVoicePreview, onVoiceSettingsClose },
+      "closed",
+    );
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    ui.updateState(defaultState);
+    ui.updateVoiceSettings({
+      availability: "browser-local",
+      catalogStatus: "ready",
+      preferredLanguage: "zh-CN",
+      effectiveLanguage: "zh-CN",
+      availableLanguages: [],
+      voices: [],
+      selectedVoiceId: null,
+      summary: "自动选择",
+      statusMessage: "已找到兼容本地音色。",
+      hasPreferences: false,
+      previewEnabled: true,
+      isPreviewing: false,
+    });
+
+    ui.toggleVoiceSettings();
+    const dialog = shadow.querySelector<HTMLElement>(".a11y-voice-settings");
+    const preview = dialog?.querySelector<HTMLButtonElement>(
+      ".a11y-voice-settings__button--primary",
+    );
+    preview?.dispatchEvent(
+      new Event("pointerdown", { bubbles: true, composed: true }),
+    );
+    expect(dialog?.hidden).toBe(false);
+    preview?.click();
+    expect(onVoicePreview).toHaveBeenCalledTimes(1);
+
+    getControl(shadow, "reading").dispatchEvent(
+      new Event("pointerdown", { bubbles: true, composed: true }),
+    );
+    expect(dialog?.hidden).toBe(true);
+
+    ui.toggleVoiceSettings();
+    outside.dispatchEvent(
+      new Event("pointerdown", { bubbles: true, composed: true }),
+    );
+    expect(dialog?.hidden).toBe(true);
+    expect(onVoiceSettingsClose).toHaveBeenCalledTimes(2);
+
+    ui.destroy();
+    host.remove();
+    outside.remove();
+  });
+
+  it("preserves voice-radio focus across selection and catalog refreshes", () => {
+    const { host, shadow, ui } = createToolbar();
+    const firstVoice = {
+      id: "uri:local:first",
+      voiceURI: "local:first",
+      name: "本地女声",
+      lang: "zh-CN",
+      isDefault: false,
+    } as const;
+    const secondVoice = {
+      id: "uri:local:second",
+      voiceURI: "local:second",
+      name: "本地男声",
+      lang: "zh-CN",
+      isDefault: true,
+    } as const;
+    const baseModel = {
+      availability: "browser-local",
+      catalogStatus: "ready",
+      preferredLanguage: "zh-CN",
+      effectiveLanguage: "zh-CN",
+      availableLanguages: ["zh-CN"],
+      voices: [firstVoice, secondVoice],
+      selectedVoiceId: secondVoice.id,
+      summary: secondVoice.name,
+      statusMessage: "已找到 2 个兼容本地音色。",
+      hasPreferences: true,
+      previewEnabled: true,
+      isPreviewing: false,
+    } as const;
+    ui.updateState(defaultState);
+    ui.updateVoiceSettings(baseModel);
+    ui.toggleVoiceSettings();
+
+    const originalSecond = shadow.querySelector<HTMLInputElement>(
+      `input[type="radio"][value="${secondVoice.id}"]`,
+    );
+    originalSecond?.focus();
+    ui.updateVoiceSettings(baseModel);
+    const replacementSecond = shadow.querySelector<HTMLInputElement>(
+      `input[type="radio"][value="${secondVoice.id}"]`,
+    );
+    expect(replacementSecond).not.toBe(originalSecond);
+    expect(shadow.activeElement).toBe(replacementSecond);
+
+    ui.updateVoiceSettings({
+      ...baseModel,
+      voices: [firstVoice],
+      selectedVoiceId: null,
+      summary: "自动选择",
+    });
+    const automatic = shadow.querySelector<HTMLInputElement>(
+      'input[type="radio"][value=""]',
+    );
+    expect(automatic?.checked).toBe(true);
+    expect(shadow.activeElement).toBe(automatic);
+
+    ui.destroy();
+    host.remove();
+  });
+
+  it("explains when browser-local voice controls are unavailable for a custom adapter", () => {
+    const { host, shadow, ui } = createToolbar();
+    ui.updateState(defaultState);
+    ui.updateVoiceSettings({
+      availability: "custom-adapter",
+      catalogStatus: "unsupported",
+      preferredLanguage: null,
+      effectiveLanguage: "zh-CN",
+      availableLanguages: [],
+      voices: [],
+      selectedVoiceId: null,
+      summary: "自定义语音",
+      statusMessage: "当前站点使用自定义语音适配器，浏览器本地音色设置不可用。",
+      hasPreferences: false,
+      previewEnabled: false,
+      isPreviewing: false,
+    });
+
+    ui.toggleVoiceSettings();
+    const dialog = shadow.querySelector<HTMLElement>(".a11y-voice-settings");
+    expect(dialog?.hasAttribute("data-voice-settings-unavailable")).toBe(true);
+    expect(dialog?.querySelector('[role="status"]')?.textContent).toContain(
+      "自定义语音适配器",
+    );
+    expect(
+      dialog?.querySelector<HTMLButtonElement>(
+        ".a11y-voice-settings__button--primary",
+      )?.disabled,
+    ).toBe(true);
+    expect(
+      dialog?.querySelector<HTMLInputElement>('input[type="radio"]')?.disabled,
+    ).toBe(true);
+
+    ui.destroy();
+    host.remove();
+  });
+
   it("keeps the brand rail non-interactive and preserves screen-mode order", () => {
     const { host, shadow, ui } = createToolbar();
     ui.updateState({ ...defaultState, isReadScreen: true });
@@ -355,6 +648,7 @@ describe("ToolbarUI", () => {
     const expectedMeta = {
       reading: "开启",
       speechRate: "1.25×",
+      voiceSelection: "自动选择",
       colorScheme: "黑底黄字",
       zoomIn: "125%",
       zoomOut: "125%",
@@ -568,6 +862,8 @@ describe("ToolbarUI", () => {
 function createToolbar(
   config = mergeConfig(DEFAULT_CONFIG),
   onCollapsedChange: (collapsed: boolean) => void = vi.fn(),
+  callbackOverrides: Partial<ConstructorParameters<typeof ToolbarUI>[3]> = {},
+  shadowMode: ShadowRootMode = "open",
 ): {
   host: HTMLDivElement;
   shadow: ShadowRoot;
@@ -575,10 +871,11 @@ function createToolbar(
 } {
   const host = document.createElement("div");
   document.body.append(host);
-  const shadow = host.attachShadow({ mode: "open" });
+  const shadow = host.attachShadow({ mode: shadowMode });
   const ui = new ToolbarUI(host, shadow, config, {
     onAction: vi.fn(),
     onCollapsedChange,
+    ...callbackOverrides,
   });
   return { host, shadow, ui };
 }

@@ -57,6 +57,46 @@ describe("PreferenceStore", () => {
     expect(new PreferenceStore(key, 1).load()).toEqual(preferences);
   });
 
+  it("round-trips a serializable voice descriptor", () => {
+    const voicePreferences: PersistedPreferences = {
+      ...preferences,
+      voice: {
+        voiceURI: "local:zh-female",
+        name: "本地女声",
+        lang: "zh-CN",
+      },
+    };
+    const store = new PreferenceStore("test:voice-preferences", 1);
+
+    store.save(voicePreferences);
+
+    expect(store.load()).toEqual(voicePreferences);
+    const payload = JSON.parse(
+      localStorage.getItem("test:voice-preferences") ?? "null",
+    ) as { preferences?: { voice?: unknown } } | null;
+    expect(payload?.preferences?.voice).toEqual(voicePreferences.voice);
+  });
+
+  it("ignores only a corrupt voice descriptor", () => {
+    const key = "test:invalid-voice-preferences";
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        version: 1,
+        preferences: {
+          ...preferences,
+          preferredLanguage: "ja-JP",
+          voice: { voiceURI: 7, name: "", lang: false },
+        },
+      }),
+    );
+
+    expect(new PreferenceStore(key, 1).load()).toEqual({
+      ...preferences,
+      preferredLanguage: "ja-JP",
+    });
+  });
+
   it("ignores corrupt or incompatible payloads", () => {
     localStorage.setItem("test:corrupt", "not-json");
     expect(new PreferenceStore("test:corrupt", 1).load()).toBeNull();

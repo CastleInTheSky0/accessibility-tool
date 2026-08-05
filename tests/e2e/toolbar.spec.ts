@@ -33,6 +33,7 @@ test("opens lazily and supports the toolbar keyboard model", async ({ page }) =>
   expect(labels).toEqual([
     "朗读",
     "语速",
+    "音色",
     "配色",
     "放大",
     "缩小",
@@ -165,7 +166,7 @@ test("cycles speech rate directly, wraps presets and persists the result", async
   const host = page.locator("[data-a11y-tool-host]");
   const rate = host.locator('[data-mode="main"] [data-action="speechRate"]');
   const reading = host.locator('[data-mode="main"] [data-action="reading"]');
-  const status = host.locator('[role="status"]');
+  const status = host.locator('.a11y-visually-hidden[role="status"]');
   const expectRate = async (value: number, label: string): Promise<void> => {
     await expect
       .poll(() =>
@@ -254,8 +255,9 @@ test("keeps all main controls on one centered row from 1024 to 2048 pixels", asy
   for (const viewport of [
     { width: 2048, minimumControlWidth: 80, maximumControlWidth: 85 },
     { width: 1440, minimumControlWidth: 80, maximumControlWidth: 85 },
-    { width: 1200, minimumControlWidth: 79, maximumControlWidth: 85 },
-    { width: 1024, minimumControlWidth: 68, maximumControlWidth: 76 },
+    { width: 1280, minimumControlWidth: 80, maximumControlWidth: 85 },
+    { width: 1200, minimumControlWidth: 74, maximumControlWidth: 77 },
+    { width: 1024, minimumControlWidth: 64, maximumControlWidth: 68 },
   ]) {
     await page.setViewportSize({ width: viewport.width, height: 800 });
     const metrics = await toolbar.evaluate((element) => {
@@ -319,13 +321,13 @@ test("keeps all main controls on one centered row from 1024 to 2048 pixels", asy
       };
     });
 
-    expect(metrics.controlCount).toBe(13);
+    expect(metrics.controlCount).toBe(14);
     expect(metrics.background).toBe("rgb(24, 27, 30)");
     expect(metrics.brandWithinFrame).toBe(true);
     expect(metrics.exitWithinFrame).toBe(true);
     expect(metrics.outerWidth).toBeCloseTo(viewport.width, 1);
-    expect(metrics.frameWidth).toBeCloseTo(Math.min(viewport.width, 1200), 1);
-    expect(metrics.frameWidth).toBeLessThanOrEqual(1200);
+    expect(metrics.frameWidth).toBeCloseTo(Math.min(viewport.width, 1280), 1);
+    expect(metrics.frameWidth).toBeLessThanOrEqual(1280);
     expect(metrics.frameCenterDelta).toBeLessThanOrEqual(0.5);
     expect(metrics.firstControlInset).toBeGreaterThan(4);
     expect(metrics.lastControlInset).toBeGreaterThan(4);
@@ -1045,7 +1047,7 @@ test("keeps keyboard focusout on the configured pinned collapse delay", async ({
   await page.keyboard.press("Enter");
   const host = page.locator("[data-a11y-tool-host]");
   const pin = host.locator('[data-action="pin"]');
-  for (let index = 0; index < 8; index += 1) {
+  for (let index = 0; index < 9; index += 1) {
     await page.keyboard.press("ArrowRight");
   }
   await expect(pin).toBeFocused();

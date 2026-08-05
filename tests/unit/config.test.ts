@@ -37,6 +37,7 @@ describe("configuration", () => {
     expect(MAIN_FEATURE_ORDER).toEqual([
       "reading",
       "speechRate",
+      "voiceSelection",
       "colorScheme",
       "zoomIn",
       "zoomOut",
