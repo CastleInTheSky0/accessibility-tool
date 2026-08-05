@@ -270,3 +270,38 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 9: 完成前端自动语言检测
+
+**Date**: 2026-08-05
+**Task**: 完成前端自动语言检测
+**Branch**: `feat/language-detection`
+
+### Summary
+
+完成 AccessibilityTool v0.2 二期任务拆分，并实现纯前端自动语言检测、可选语言偏好兼容、动态 DOM 重新解析、单元与 Chrome/Edge E2E 覆盖及接入规范更新。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4168221` | (see git log) |
+| `ef07f9b` | (see git log) |
+| `3463bf9` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
