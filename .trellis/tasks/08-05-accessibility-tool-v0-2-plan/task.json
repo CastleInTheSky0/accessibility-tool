@@ -1,0 +1,33 @@
+{
+  "id": "accessibility-tool-v0-2-plan",
+  "name": "accessibility-tool-v0-2-plan",
+  "title": "AccessibilityTool v0.2 总体规划",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": "frontend",
+  "package": null,
+  "priority": "P2",
+  "creator": "Sylvan",
+  "assignee": "Sylvan",
+  "createdAt": "2026-08-05",
+  "completedAt": null,
+  "branch": "feat/accessibility-tool-v0.2",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-05-voice-selection",
+    "08-05-continuous-reading",
+    "08-05-large-caption",
+    "08-05-mobile-layout",
+    "08-05-tablet-layout",
+    "08-05-language-detection"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
