@@ -1,0 +1,44 @@
+html,
+body {
+  background: #ffecff;
+  color: #4b004b;
+  font: 22px/1.6 Georgia, serif;
+  margin: 0;
+}
+
+body * {
+  letter-spacing: 0.08em !important;
+}
+
+div {
+  background: lime !important;
+  border: 9px dashed red !important;
+  color: purple !important;
+  padding: 30px !important;
+}
+
+button,
+a {
+  background: rebeccapurple !important;
+  border: 12px dotted yellow !important;
+  border-radius: 50% !important;
+  color: white !important;
+  display: inline-block !important;
+  font: 28px Papyrus, fantasy !important;
+  min-height: 130px !important;
+  padding: 28px !important;
+  transform: rotate(-2deg) !important;
+}
+
+svg {
+  fill: hotpink !important;
+  height: 90px !important;
+  transform: rotate(45deg) !important;
+  width: 90px !important;
+}
+
+main {
+  margin: 10vh auto;
+  max-width: 900px;
+  padding: 30px;
+}

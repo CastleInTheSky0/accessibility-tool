@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>关闭语义自动识别 — AccessibilityTool</title>
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="stylesheet" href="/demo.css" />
+    <script defer src="/accessibility-tool.min.js"></script>
+    <script defer src="/demos/semantic-off.js"></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="wordmark" href="/">A11Y / TOOL</a>
+      <nav aria-label="本页语义导航"><a href="#semantic">语义元素</a></nav>
+      <button class="launch-button" type="button" id="open-tool">打开工具</button>
+    </header>
+    <main id="semantic" class="chapter__body">
+      <p class="eyebrow">autoDetect: false</p>
+      <h1>自动识别已关闭</h1>
+      <p class="lede">下方 nav 与 main 仅有语义标签，因此不会加入盲道区域；显式标记的服务区仍会被识别。</p>
+      <nav aria-label="不会自动加入的导航"><a href="#explicit">普通 nav</a></nav>
+      <section id="explicit" data-a11y-region="service" data-a11y-label="显式服务区">
+        <h2>显式服务区</h2><p>该区域使用 data-a11y-region，因此仍会计数。</p>
+      </section>
+      <p><a href="/">返回完整演示</a></p>
+    </main>
+  </body>
+</html>

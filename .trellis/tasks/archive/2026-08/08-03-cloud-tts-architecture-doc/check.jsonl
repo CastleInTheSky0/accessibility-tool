@@ -1,0 +1,3 @@
+{"file":".trellis/spec/frontend/accessibility-tool-contract.md","reason":"复核文档是否与当前功能、配置和首版边界一致。"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"复核 Markdown 变更、链接和未触碰用户现有改动等质量要求。"}
+{"file":".trellis/tasks/08-03-cloud-tts-architecture-doc/research/vendor-costs.md","reason":"复核成本数字、日期提示和官方来源是否完整。"}

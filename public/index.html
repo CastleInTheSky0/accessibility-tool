@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="AccessibilityTool v0.1.0 功能与键盘交互演示"
+    />
+    <title>AccessibilityTool — 桌面端无障碍工具演示</title>
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="stylesheet" href="/demo.css" />
+    <script defer src="/accessibility-tool.min.js"></script>
+    <script defer src="/demo.js"></script>
+  </head>
+  <body>
+    <header class="site-header" data-a11y-region="1" data-a11y-label="演示页视窗">
+      <a class="wordmark" href="#main">A11Y / TOOL</a>
+      <nav aria-label="演示页主导航">
+        <a href="#regions">盲道区域</a>
+        <a href="#tabs-demo">选项卡</a>
+        <a href="#dynamic-demo">动态页面</a>
+        <a href="/help.html">帮助</a>
+      </nav>
+      <button class="launch-button" type="button" data-open-tool>
+        打开无障碍工具
+      </button>
+    </header>
+
+    <main id="main" data-a11y-region="content" data-a11y-label="演示正文">
+      <section class="hero" aria-labelledby="hero-title">
+        <p class="eyebrow">AccessibilityTool / v0.1.0 / Desktop</p>
+        <h1 id="hero-title">让页面结构<br />成为可行走的界面。</h1>
+        <div class="hero__aside">
+          <p>
+            一套零运行时依赖的原生 TypeScript 工具栏。通过页面属性识别六类盲道区域，
+            同时增强朗读、视觉辅助、标准选项卡与关联浮层。
+          </p>
+          <button class="primary-action" type="button" data-open-tool>
+            唤醒工具栏
+          </button>
+          <p class="shortcut-note"><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>A</kbd> 展开已固定的工具栏</p>
+        </div>
+      </section>
+
+      <section id="regions" class="chapter" aria-labelledby="regions-title">
+        <div class="chapter__number" aria-hidden="true">01</div>
+        <div class="chapter__body">
+          <p class="eyebrow">Blind-path protocol</p>
+          <h2 id="regions-title">六类区域，按 DOM 顺序导航</h2>
+          <p class="lede">
+            本页同时演示英文值、数字值、兼容旧属性以及保守语义识别。进入“读屏专用”后，
+            使用 <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>1–6</kbd> 逐类循环定位。
+          </p>
+
+          <div class="region-ledger">
+            <section data-a11y-region="viewport" data-a11y-label="内容视窗">
+              <span>1</span><strong>视窗区</strong><code>viewport</code>
+            </section>
+            <nav data-a11y-region="2" data-a11y-label="产品导航">
+              <span>2</span><strong>导航区</strong><code>2</code>
+            </nav>
+            <form data-a11y-region="interaction" data-a11y-label="检索表单">
+              <span>3</span><strong>交互区</strong><label>示例检索 <input type="search" placeholder="输入关键词" /></label>
+            </form>
+            <section data-demo-service data-a11y-label="在线服务">
+              <span>4</span><strong>服务区</strong><a href="mailto:service@example.test">联系服务</a>
+            </section>
+            <section role="list" aria-label="功能清单">
+              <span>5</span><strong>列表区</strong><code>role=list + name</code>
+            </section>
+            <article aria-role="6" aria-readlabel="旧站正文示例">
+              <span>6</span><strong>正文区</strong><code>旧属性只读兼容</code>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="tabs-demo" class="chapter" aria-labelledby="tabs-title">
+        <div class="chapter__number" aria-hidden="true">02</div>
+        <div class="chapter__body">
+          <p class="eyebrow">Tabs and linked panels</p>
+          <h2 id="tabs-title">原页面事件继续负责视觉切换</h2>
+
+          <div class="demo-split">
+            <section class="tab-example" aria-labelledby="auto-tabs-label">
+              <h3 id="auto-tabs-label">自动激活 / click</h3>
+              <div role="tablist" aria-label="产品栏目">
+                <button id="tab-overview" role="tab" aria-controls="panel-overview" aria-selected="true" data-a11y-activation="automatic" data-a11y-trigger-event="click">概览</button>
+                <button id="tab-protocol" role="tab" aria-controls="panel-protocol" aria-selected="false" data-a11y-activation="automatic" data-a11y-trigger-event="click">属性协议</button>
+                <button id="tab-keyboard" role="tab" aria-controls="panel-keyboard" aria-selected="false" data-a11y-activation="automatic" data-a11y-trigger-event="click">键盘模型</button>
+              </div>
+              <section id="panel-overview" role="tabpanel" data-a11y-region="viewport" aria-labelledby="tab-overview">
+                <p>Tab、Shift+Tab 或方向键移动焦点时触发页面已有的 click 事件；工具只补充焦点与 ARIA 状态。</p>
+                <a href="#dynamic-demo">继续查看动态页面</a>
+              </section>
+              <section id="panel-protocol" role="tabpanel" data-a11y-region="viewport" aria-labelledby="tab-protocol" data-a11y-hidden>
+                <p>推荐使用 <code>data-a11y-region</code> 与 <code>data-a11y-label</code>。</p>
+                <button type="button">面板内按钮</button>
+              </section>
+              <section id="panel-keyboard" role="tabpanel" data-a11y-region="viewport" aria-labelledby="tab-keyboard" data-a11y-hidden>
+                <p>在选项上按 Alt + 下方向键进入面板；面板内按 Esc 返回原选项。</p>
+                <label>测试输入 <input type="text" /></label>
+              </section>
+            </section>
+
+            <section class="tab-example" aria-labelledby="manual-tabs-label">
+              <h3 id="manual-tabs-label">手动激活 / mouseover</h3>
+              <div
+                role="tablist"
+                aria-label="手动示例"
+              >
+                <button id="tab-manual-a" role="tab" aria-controls="panel-manual-a" aria-selected="true" data-a11y-activation="manual" data-a11y-trigger-event="mouseover">方案 A</button>
+                <button id="tab-manual-b" role="tab" aria-controls="panel-manual-b" aria-selected="false" data-a11y-activation="manual" data-a11y-trigger-event="mouseover">方案 B</button>
+              </div>
+              <section id="panel-manual-a" role="tabpanel" data-a11y-region="viewport" aria-labelledby="tab-manual-a">
+                <p>方向键只移动焦点，按 Enter 或空格后触发 mouseover。</p>
+              </section>
+              <section id="panel-manual-b" role="tabpanel" data-a11y-region="viewport" aria-labelledby="tab-manual-b" data-a11y-hidden>
+                <p>事件由示例站点处理，工具不直接改写面板显示样式。</p>
+              </section>
+            </section>
+          </div>
+
+          <section class="floating-demo" aria-labelledby="floating-title">
+            <h3 id="floating-title">关联浮层</h3>
+            <div role="tablist" aria-label="浮层示例">
+              <button id="tab-modal" role="tab" aria-controls="panel-modal" aria-selected="true">模态窗口</button>
+              <button id="tab-floating" role="tab" aria-controls="panel-floating" aria-selected="false">非模态浮层</button>
+            </div>
+            <dialog id="panel-modal" role="tabpanel" data-a11y-region="viewport" aria-labelledby="tab-modal">
+              <h4>模态演示</h4>
+              <p>Tab 被约束在原生 dialog 内；按 Esc 后焦点回到“模态窗口”选项。</p>
+              <button type="button" data-a11y-dialog-close>关闭窗口</button>
+            </dialog>
+            <section
+              id="panel-floating"
+              class="demo-floating-panel"
+              role="tabpanel" data-a11y-region="viewport"
+              aria-labelledby="tab-floating"
+              data-a11y-hidden
+            >
+              <h4>非模态浮层</h4>
+              <p>焦点可以正常离开；按 Esc 使用页面已有关闭按钮并回到原选项。</p>
+              <button type="button" data-a11y-dialog-close>关闭浮层</button>
+            </section>
+          </section>
+        </div>
+      </section>
+
+      <section id="dynamic-demo" class="chapter" aria-labelledby="dynamic-title">
+        <div class="chapter__number" aria-hidden="true">03</div>
+        <div class="chapter__body">
+          <p class="eyebrow">Dynamic DOM / SPA / Shadow DOM</p>
+          <h2 id="dynamic-title">页面变化后自动刷新区域数量</h2>
+          <div class="command-row" data-a11y-region="interaction" data-a11y-label="动态区域操作">
+            <button type="button" id="add-region">新增服务区</button>
+            <button type="button" id="toggle-region">隐藏/显示最新区域</button>
+            <button type="button" id="remove-region">删除最新区域</button>
+            <button type="button" id="route-change">模拟 SPA 路由</button>
+          </div>
+          <div id="dynamic-regions" class="dynamic-regions" aria-live="polite"></div>
+          <div id="route-outlet" class="route-outlet" data-a11y-region="content" data-a11y-label="SPA 当前页面">
+            <p>当前路由：<strong>/demo</strong></p>
+          </div>
+
+          <div class="platform-grid">
+            <section>
+              <h3>开放式 Shadow Root</h3>
+              <div id="shadow-demo"></div>
+            </section>
+            <section>
+              <h3>同源 iframe</h3>
+              <iframe
+                title="同源区域演示"
+                srcdoc="<!doctype html><html lang='zh-CN'><body><nav data-a11y-region='navigation' data-a11y-label='iframe 导航'><a href='#inside'>iframe 内链接</a></nav><main id='inside' data-a11y-region='6' data-a11y-label='iframe 正文'><p>该内容可以被扫描和朗读。</p></main></body></html>"
+              ></iframe>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <section class="chapter final-chapter" data-a11y-region="service" data-a11y-label="接入资源">
+        <div class="chapter__number" aria-hidden="true">04</div>
+        <div class="chapter__body">
+          <p class="eyebrow">Integration</p>
+          <h2>一个全局对象，一次显式调用。</h2>
+          <pre><code>AccessibilityTool.configure({
+  regions: { autoDetect: true }
+});
+
+button.addEventListener("click", () =&gt; {
+  AccessibilityTool.open({ trigger: button });
+});</code></pre>
+          <div class="resource-links">
+            <a href="/help.html">查看用户帮助</a>
+            <a href="/demos/semantic-off.html">自动识别关闭示例</a>
+            <a href="/demos/hostile.html">强宿主 CSS 隔离示例</a>
+            <a href="/demos/csp.html">严格 CSP 示例</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <span>AccessibilityTool 0.1.0</span>
+      <button type="button" data-open-tool>再次打开工具栏</button>
+    </footer>
+  </body>
+</html>

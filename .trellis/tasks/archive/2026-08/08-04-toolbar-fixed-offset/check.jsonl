@@ -1,0 +1,2 @@
+{"file":".trellis/spec/frontend/index.md","reason":"Frontend quality-check entry point."}
+{"file":".trellis/spec/frontend/accessibility-tool-contract.md","reason":"Verify fixed toolbar placement, push/overlay behavior, reversible styles, and browser coverage."}

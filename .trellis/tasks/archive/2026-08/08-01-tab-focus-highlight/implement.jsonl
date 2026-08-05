@@ -1,0 +1,4 @@
+{"file":".trellis/spec/frontend/accessibility-tool-contract.md","reason":"Defines lifecycle cleanup, Shadow Root isolation, focus behavior, and release test gates for the toolbar runtime."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Frontend quality and testing checklist for implementation work."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Requires extending existing overlay and lifecycle patterns instead of duplicating page-effect mechanisms."}
+{"file":".trellis/tasks/08-01-tab-focus-highlight/research/zjcs-reference.md","reason":"Records the verified reference behavior, colors, DOM-order cycling, temporary region focus anchor, and direct node outline strategy."}

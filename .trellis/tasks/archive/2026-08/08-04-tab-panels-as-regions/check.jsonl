@@ -1,0 +1,4 @@
+{"file":".trellis/spec/frontend/accessibility-tool-contract.md","reason":"逐项复核隐藏面板区域、计数、激活、焦点、朗读和恢复行为。"}
+{"file":".trellis/spec/frontend/state-management.md","reason":"检查并发导航、超时、过期异步结果和控制器停止后的安全性。"}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"检查内部协议与新增元数据是否完整且无不安全断言。"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"执行完整质量门并确认不覆盖 public/index.html 中无关的用户改动。"}

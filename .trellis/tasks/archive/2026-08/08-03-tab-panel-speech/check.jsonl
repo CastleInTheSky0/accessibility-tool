@@ -1,0 +1,3 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/accessibility-tool-contract.md", "reason": "按运行时契约复核精确文案、键盘行为、失败路径和测试覆盖"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查 Tabs、Reading、Region、Speech 之间是否存在重复或顺序依赖"}

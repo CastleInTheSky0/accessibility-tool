@@ -1,0 +1,5 @@
+{"file":".trellis/spec/frontend/accessibility-tool-contract.md","reason":"本任务改变盲道区域计数、隐藏面板激活、焦点与选项卡朗读的现有运行契约。"}
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"区域扫描、区域导航、选项卡和运行时编排需要保持控制器职责清晰并复用现有边界。"}
+{"file":".trellis/spec/frontend/state-management.md","reason":"隐藏面板异步显示、快速重复导航、过期请求和可逆 DOM 状态需要遵守状态管理约定。"}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"ScannedRegion 元数据、异步回调和跨控制器协议需要保持严格类型。"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"指导单元、E2E、文档和用户未提交文件保护等质量要求。"}

@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AccessibilityTool 用户帮助</title>
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="stylesheet" href="/demo.css" />
+    <link rel="stylesheet" href="/help.css" />
+  </head>
+  <body>
+    <header class="help-header">
+      <a class="wordmark" href="/">A11Y / TOOL</a>
+      <span>用户帮助 / v0.1.0</span>
+    </header>
+    <main id="main" class="help-layout">
+      <aside aria-label="帮助目录">
+        <nav>
+          <a href="#start">开始使用</a>
+          <a href="#toolbar">主工具栏</a>
+          <a href="#screen">读屏专用</a>
+          <a href="#tabs">选项卡面板</a>
+          <a href="#shortcuts">快捷键</a>
+          <a href="#privacy">隐私与限制</a>
+        </nav>
+      </aside>
+      <article>
+        <p class="eyebrow">AccessibilityTool help</p>
+        <h1>无障碍工具<br />使用说明</h1>
+
+        <section id="start">
+          <h2>开始使用</h2>
+          <ol>
+            <li>在接入页面选择“打开无障碍工具”按钮。</li>
+            <li>工具栏打开后，使用左右方向键选择功能，按 Enter 或空格执行。</li>
+            <li>按 Tab 可离开工具栏并继续浏览页面内容。</li>
+            <li>成功打开后，刷新或进入同一网站内同样提供本工具的页面会保持打开；恢复过程不会抢焦点或重复播报打开提示。</li>
+            <li>选择“退出”会恢复页面原有视觉效果、清除保持打开状态，并把焦点送回唤醒按钮。</li>
+          </ol>
+        </section>
+
+        <section id="toolbar">
+          <h2>主工具栏功能</h2>
+          <dl class="feature-list">
+            <div><dt>朗读</dt><dd>开启后，聚焦、点击或悬停页面内容可朗读最小语义单元；链接、图片、按钮、输入框、复选框、单选框和下拉框会说明类型，输入框使用“输入框：内容”，其它内容使用“文本：内容”，新目标会打断旧语音。</dd></div>
+            <div><dt>语速</dt><dd>点击按钮或按 Enter / 空格，依次循环 0.75×、1×、1.25×、1.5×，然后回到 0.75×。</dd></div>
+            <div><dt>配色</dt><dd>依次切换原始、白底黑字、黑底黄字、黄底黑字和蓝底白字。</dd></div>
+            <div><dt>放大 / 缩小</dt><dd>以 25% 为步长，在 75%～200% 之间调整页面，工具栏保持原尺寸。</dd></div>
+            <div><dt>大鼠标</dt><dd>使用约 48px 的高对比光标，并保留箭头、手型和文本光标语义。</dd></div>
+            <div><dt>十字线</dt><dd>鼠标操作时跟随指针，键盘操作时跟随当前焦点。</dd></div>
+            <div><dt>大界面</dt><dd>使用浏览器标准全屏。进入后可按 Esc 退出全屏。</dd></div>
+            <div><dt>固定</dt><dd>把工具栏固定在视口顶部；鼠标离开后立即播放约 180ms 收起动画，纯键盘离开时按配置延迟收起。</dd></div>
+            <div><dt>重置</dt><dd>保持工具栏及跨页面打开状态，恢复默认配色、100% 缩放、普通光标等设置。</dd></div>
+            <div><dt>帮助</dt><dd>在新标签页打开本说明。</dd></div>
+            <div><dt>读屏专用</dt><dd>切换到六类盲道区域导航界面。</dd></div>
+            <div><dt>退出</dt><dd>停止语音、退出全屏、撤销页面效果并关闭工具栏。</dd></div>
+          </dl>
+        </section>
+
+        <section id="screen">
+          <h2>读屏专用模式</h2>
+          <p>读屏专用界面按以下顺序显示：</p>
+          <ol>
+            <li>视窗区</li><li>导航区</li><li>交互区</li><li>服务区</li><li>列表区</li><li>正文区</li>
+            <li>读屏专用</li><li>声音开关</li><li>帮助</li><li>退出</li>
+          </ol>
+          <p>
+            每类按钮显示当前数量。选择某一类后，会按页面结构顺序定位到下一个同类区域；
+            到末尾后回到第一个。不同分类分别记忆上次位置。
+          </p>
+          <p>
+            区域容器通过分类按钮、Tab、Shift+Tab 或脚本获得焦点时，都会朗读相同的完整进入提示；
+            进入区域内部链接或按钮后只朗读当前节点，不重复区域提示，页面变化触发的自动恢复不会额外播报。
+          </p>
+        </section>
+
+        <section id="tabs">
+          <h2>选项卡与关联面板</h2>
+          <p>
+            每个有效选项通过 Tab、Shift+Tab、方向键、点击或脚本获得焦点时，都会朗读一条完整提示，
+            包含选项名称、所在盲道区域分类，以及“按 ALT+下键进入窗口”的操作说明；链接选项还会先提示“链接”。
+            进入面板后会说明来源选项、区域分类、Tab 遍历和 Esc 返回方式，按 Esc 成功返回时只提示“已返回某某选项”。
+          </p>
+          <ul>
+            <li>Tab/Shift+Tab：按照页面顺序逐项聚焦选项，并在首尾自然离开选项卡组。</li>
+            <li>横向选项卡：左右方向键移动，Home/End 到首尾。</li>
+            <li>纵向选项卡：上下方向键移动，Home/End 到首尾。</li>
+            <li>自动选项：通过 Tab 或方向键移动到该选项时触发页面原事件。</li>
+            <li>手动选项：该选项获得焦点后，按 Enter 或空格触发页面原事件。</li>
+            <li>面板没有可通过 Tab 聚焦的内容时会明确提示，工具不会把静态文字加入 Tab 顺序。</li>
+            <li>面板视觉显示仍由页面原事件处理；工具只同步选项和面板的无障碍状态。</li>
+          </ul>
+        </section>
+
+        <section id="shortcuts">
+          <h2>快捷键</h2>
+          <table>
+            <thead><tr><th>快捷键</th><th>作用</th></tr></thead>
+            <tbody>
+              <tr><td>Alt + Shift + A</td><td>展开已固定并收起的工具栏</td></tr>
+              <tr><td>Alt + Shift + 1</td><td>下一个视窗区</td></tr>
+              <tr><td>Alt + Shift + 2</td><td>下一个导航区</td></tr>
+              <tr><td>Alt + Shift + 3</td><td>下一个交互区</td></tr>
+              <tr><td>Alt + Shift + 4</td><td>下一个服务区</td></tr>
+              <tr><td>Alt + Shift + 5</td><td>下一个列表区</td></tr>
+              <tr><td>Alt + Shift + 6</td><td>下一个正文区</td></tr>
+              <tr><td>Alt + ↓</td><td>从选项卡进入关联面板</td></tr>
+              <tr><td>Esc</td><td>退出关联面板或退出浏览器全屏</td></tr>
+            </tbody>
+          </table>
+          <p>六类区域快捷键只在读屏专用开启时生效，且不会拦截输入框、文本域或可编辑区域。</p>
+        </section>
+
+        <section id="privacy">
+          <h2>隐私与首版限制</h2>
+          <p>
+            工具默认不联网，不上传页面内容、朗读文本或用户操作。偏好和“保持打开”状态仅保存在当前站点的 localStorage；
+            存储不可用时退化为当前页面内存，因此无法在刷新后保持打开。
+          </p>
+          <p>v0.1.0 为桌面端版本，不包含移动端布局、连续朗读、大字幕、音色选择或云端语音服务。</p>
+        </section>
+
+        <p class="back-link"><a href="/">← 返回功能演示</a></p>
+      </article>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,2 @@
+{"file":".trellis/spec/frontend/index.md","reason":"检查前端规范入口与文档约束。"}
+{"file":".trellis/spec/frontend/accessibility-tool-contract.md","reason":"核对工具栏视觉、可访问性、布局占位、状态同步和跨浏览器测试契约。"}

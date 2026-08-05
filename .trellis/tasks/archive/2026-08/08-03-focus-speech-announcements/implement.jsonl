@@ -1,0 +1,2 @@
+{"file":".trellis/spec/frontend/accessibility-tool-contract.md","reason":"Update the focus-driven region announcement contract and preserve speech, region, Shadow Root, iframe, and reversible lifecycle behavior."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Apply the repository frontend quality and verification expectations while changing focus and speech behavior."}
