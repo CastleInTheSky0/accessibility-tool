@@ -305,3 +305,38 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 10: 完成浏览器本地音色选择
+
+**Date**: 2026-08-06
+**Task**: 完成浏览器本地音色选择
+**Branch**: `feat/accessibility-tool-v0.2`
+
+### Summary
+
+实现浏览器本地音色目录、语言筛选、偏好恢复、试听、14 控件桌面工具栏与 1280px 版心；修复 closed Shadow Root 外部点击和焦点恢复边界，Chrome/Edge 全量测试通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f6f9734` | (see git log) |
+| `f957abf` | (see git log) |
+| `495f313` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
