@@ -65,6 +65,24 @@ test("shows one orange current-region node for click, shortcut and page focus", 
   await expect(viewport).toHaveAttribute("aria-label", "视窗区，共 9 个");
   await expect(host.locator('[aria-current="location"]')).toHaveCount(1);
   await expect.poll(() => getLocalTrackScale(viewport)).toBeGreaterThan(0.99);
+  await expect(viewport.locator(".a11y-control__icon")).toHaveCSS(
+    "background-color",
+    "rgb(244, 122, 0)",
+  );
+  await expect
+    .poll(() =>
+      viewport.evaluate(
+        (element) => getComputedStyle(element, "::before").opacity,
+      ),
+    )
+    .toBe("1");
+  await expect
+    .poll(() =>
+      viewport.locator(".a11y-control__icon").evaluate(
+        (element) => getComputedStyle(element).boxShadow,
+      ),
+    )
+    .toMatch(/rgba?\(244, 122, 0(?:, 1)?\)/);
 
   const currentStyle = await viewport.evaluate((element) => {
     const icon = element.querySelector<HTMLElement>(".a11y-control__icon");
@@ -117,8 +135,8 @@ test("shows one orange current-region node for click, shortcut and page focus", 
   expect(currentStyle.trackTransitionTiming).toContain(
     "cubic-bezier(0.22, 1, 0.36, 1)",
   );
-  expect(currentStyle.iconRing).toContain("rgb(24, 27, 30)");
-  expect(currentStyle.iconRing).toContain("rgb(244, 122, 0)");
+  expect(currentStyle.iconRing).toMatch(/rgba?\(24, 27, 30(?:, 1)?\)/);
+  expect(currentStyle.iconRing).toMatch(/rgba?\(244, 122, 0(?:, 1)?\)/);
   await expect(navigation.locator(".a11y-control__icon")).toHaveCSS(
     "background-color",
     "rgb(107, 113, 119)",

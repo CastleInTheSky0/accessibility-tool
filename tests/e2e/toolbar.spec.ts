@@ -5,6 +5,20 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("opens lazily and supports the toolbar keyboard model", async ({ page }) => {
+  await page.evaluate(() => {
+    window.AccessibilityTool.configure({
+      speech: {
+        adapter: {
+          isSupported: () => true,
+          speak: (_text, options) => {
+            options.onStart?.();
+            options.onEnd?.();
+          },
+          cancel: () => undefined,
+        },
+      },
+    });
+  });
   const launcher = page.getByRole("button", { name: "打开无障碍工具" });
   const host = page.locator("[data-a11y-tool-host]");
   await expect(host).toHaveCount(0);
@@ -1038,7 +1052,7 @@ test("keeps keyboard focusout on the configured pinned collapse delay", async ({
   await page.keyboard.press("Enter");
   await expect(pin).toHaveAttribute("aria-pressed", "true");
   await armCollapsedMutationTiming(host);
-  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
   await expect(pin).not.toBeFocused();
 
   await expect(host).toHaveAttribute("data-a11y-tool-collapsed", "", {

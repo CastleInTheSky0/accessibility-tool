@@ -18,6 +18,7 @@ test.beforeEach(async ({ page }) => {
       <img id="static-image" alt="普通图片">
       <a id="custom-aria-link" role="link">自定义链接</a>
       <span id="explicit-negative-control" role="button" tabindex="-1">显式跳过</span>
+      <input id="focus-pointer" aria-label="鼠标焦点目标">
     `;
     document.body.append(fixture);
     const regionWithHostShadow = document.querySelector("header nav");
@@ -38,6 +39,7 @@ test("follows native page focus from keyboard, script and mouse", async ({
   const host = page.locator("[data-a11y-tool-host]");
   const first = page.locator("#focus-first");
   const second = page.locator("#focus-second");
+  const pointerTarget = page.getByRole("textbox", { name: "鼠标焦点目标" });
   const originalFirstOutline = await snapshotInlineOutline(first);
 
   await first.focus();
@@ -54,9 +56,9 @@ test("follows native page focus from keyboard, script and mouse", async ({
   await expect(first).toBeFocused();
   await expectOwnedOutline(first, FOCUS_COLOR);
 
-  await second.click();
-  await expect(second).toBeFocused();
-  await expectOwnedOutline(second, FOCUS_COLOR);
+  await pointerTarget.click();
+  await expect(pointerTarget).toBeFocused();
+  await expectOwnedOutline(pointerTarget, FOCUS_COLOR);
   await expect(first).not.toHaveAttribute("tabindex", /.+/);
   await expect(second).not.toHaveAttribute("tabindex", /.+/);
   await expect(host.locator(".a11y-focus-highlight")).toHaveCount(0);
@@ -157,13 +159,26 @@ test("adds region anchors to ordinary Tab order and preserves native descendants
   const host = page.locator("[data-a11y-tool-host]");
 
   const region = page.locator("header nav");
-  const firstLink = region.getByRole("link", { name: "盲道区域" });
-  const secondLink = region.getByRole("link", { name: "选项卡" });
-  const previousLink = page.getByRole("link", { name: "A11Y / TOOL" });
+  await region.evaluate((element) => {
+    const previous = document.createElement("button");
+    previous.type = "button";
+    previous.textContent = "区域前操作";
+    element.before(previous);
+    const first = document.createElement("button");
+    first.type = "button";
+    first.textContent = "区域内操作一";
+    const second = document.createElement("button");
+    second.type = "button";
+    second.textContent = "区域内操作二";
+    element.prepend(first, second);
+  });
+  const firstControl = region.getByRole("button", { name: "区域内操作一" });
+  const secondControl = region.getByRole("button", { name: "区域内操作二" });
+  const previousControl = page.getByRole("button", { name: "区域前操作" });
   const originalRegionOutline = await snapshotInlineOutline(region);
 
-  await previousLink.focus();
-  await expect(previousLink).toBeFocused();
+  await previousControl.focus();
+  await expect(previousControl).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(region).toBeFocused();
   await expect(region).toHaveAttribute("tabindex", "0");
@@ -171,29 +186,29 @@ test("adds region anchors to ordinary Tab order and preserves native descendants
   await expectOwnedOutline(region, FOCUS_COLOR);
 
   await page.keyboard.press("Tab");
-  await expect(firstLink).toBeFocused();
+  await expect(firstControl).toBeFocused();
   await expectOwnedOutline(region, REGION_COLOR);
-  await expectOwnedOutline(firstLink, FOCUS_COLOR);
+  await expectOwnedOutline(firstControl, FOCUS_COLOR);
 
   await page.keyboard.press("Tab");
-  await expect(secondLink).toBeFocused();
+  await expect(secondControl).toBeFocused();
   await expectOwnedOutline(region, REGION_COLOR);
-  await expectOwnedOutline(secondLink, FOCUS_COLOR);
+  await expectOwnedOutline(secondControl, FOCUS_COLOR);
 
   await page.keyboard.press("Shift+Tab");
-  await expect(firstLink).toBeFocused();
+  await expect(firstControl).toBeFocused();
   await expectOwnedOutline(region, REGION_COLOR);
-  await expectOwnedOutline(firstLink, FOCUS_COLOR);
-  await expect(firstLink).not.toHaveAttribute("tabindex", /.+/);
-  await expect(secondLink).not.toHaveAttribute("tabindex", /.+/);
+  await expectOwnedOutline(firstControl, FOCUS_COLOR);
+  await expect(firstControl).not.toHaveAttribute("tabindex", /.+/);
+  await expect(secondControl).not.toHaveAttribute("tabindex", /.+/);
 
   await page.keyboard.press("Shift+Tab");
   await expect(region).toBeFocused();
   await expectOwnedOutline(region, FOCUS_COLOR);
 
   await page.keyboard.press("Shift+Tab");
-  await expect(previousLink).toBeFocused();
-  await expectOwnedOutline(previousLink, FOCUS_COLOR);
+  await expect(previousControl).toBeFocused();
+  await expectOwnedOutline(previousControl, FOCUS_COLOR);
   await expect(region).toHaveAttribute("tabindex", "0");
   await expect(region).not.toHaveAttribute("aria-regionactive", /.+/);
   expect(await snapshotInlineOutline(region)).toEqual(originalRegionOutline);
@@ -265,7 +280,12 @@ test("keeps an outer region active while focus enters a same-origin iframe", asy
 
 test("retains distinct inline outline ownership in forced colors", async ({
   page,
+  browserName,
 }) => {
+  test.skip(
+    browserName === "webkit",
+    "Playwright WebKit does not expose forced-colors emulation.",
+  );
   await page.emulateMedia({ forcedColors: "active" });
   const host = page.locator("[data-a11y-tool-host]");
   await host.locator('[data-mode="main"] [data-action="readScreen"]').click();
