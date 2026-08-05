@@ -19,6 +19,7 @@ import {
 } from "./core/storage";
 import { DomRegistrationController } from "./features/dom-registration";
 import { PageEffectsController } from "./features/page-effects";
+import { normalizeLanguageTag } from "./features/language";
 import { ReadingController } from "./features/reading";
 import { RegionNavigationController } from "./features/region-navigation";
 import { RegionScanner } from "./features/regions";
@@ -81,6 +82,7 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
   private regionNavigation: RegionNavigationController | null = null;
   private tabs: TabsController | null = null;
   private tabsStarted = false;
+  private preferredLanguage: string | null = null;
   private suppressFullscreenAnnouncement = false;
   private openOperation: Promise<AccessibilityToolApi> | null = null;
   private openOperationMode: OpenMode | null = null;
@@ -239,6 +241,8 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
     }
 
     const stored = this.getStore().load();
+    this.preferredLanguage =
+      normalizeLanguageTag(stored?.preferredLanguage) ?? null;
     this.state = constrainStateToFeatures(
       this.activeConfig,
       hydrateState(this.activeConfig, stored),
@@ -298,6 +302,7 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
 
   async reset(): Promise<AccessibilityToolApi> {
     this.getStore().clear();
+    this.preferredLanguage = null;
     if (!this.state.isOpen) {
       this.state = createDefaultState(this.activeConfig);
       return this;
@@ -500,6 +505,7 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
       {
         isEnabled: () => this.state.isOpen && this.state.readingEnabled,
         getRate: () => this.state.speechRate,
+        getPreferredLanguage: () => this.preferredLanguage,
       },
       {
         isRegionContainer: (element) =>
@@ -945,6 +951,9 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
       crosshair: this.state.crosshair,
       isPinned: this.state.isPinned,
       isReadScreen: this.state.isReadScreen,
+      ...(this.preferredLanguage
+        ? { preferredLanguage: this.preferredLanguage }
+        : {}),
     };
     this.getStore().save(preferences);
   }

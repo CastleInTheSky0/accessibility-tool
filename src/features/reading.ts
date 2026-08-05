@@ -2,11 +2,11 @@ import type { ResolvedAccessibilityToolConfig } from "../core/config";
 import {
   getAccessibleText,
   getClosestReadableElement,
-  getElementLanguage,
   isHTMLElement,
   isVisible,
   shouldIgnoreReadingTarget,
 } from "../core/dom";
+import { resolveSpeechLanguage } from "./language";
 import type { PageEffectsController } from "./page-effects";
 import type { SpeechController } from "./speech";
 
@@ -15,6 +15,7 @@ type ReadingRoot = Document | ShadowRoot;
 interface ReadingStateProvider {
   isEnabled: () => boolean;
   getRate: () => number;
+  getPreferredLanguage: () => string | null;
 }
 
 interface ReadingTargetProvider {
@@ -29,6 +30,7 @@ export class ReadingController {
   private hoverTarget: HTMLElement | null = null;
   private lastTarget: HTMLElement | null = null;
   private lastText = "";
+  private lastLanguage = "";
   private activeTarget: HTMLElement | null = null;
   private running = false;
 
@@ -87,6 +89,7 @@ export class ReadingController {
     this.speech.cancel();
     this.lastTarget = null;
     this.lastText = "";
+    this.lastLanguage = "";
     if (this.activeTarget) {
       this.effects.clearHighlight(this.activeTarget);
       this.activeTarget = null;
@@ -117,17 +120,30 @@ export class ReadingController {
       return;
     }
     const text = getAccessibleText(element);
-    if (!text || (!force && element === this.lastTarget && text === this.lastText)) {
+    const language = resolveSpeechLanguage({
+      element,
+      text,
+      preferredLanguage: this.state.getPreferredLanguage(),
+      projectDefault: this.config.locale,
+    }).language;
+    if (
+      !text ||
+      (!force &&
+        element === this.lastTarget &&
+        text === this.lastText &&
+        language === this.lastLanguage)
+    ) {
       return;
     }
 
     this.lastTarget = element;
     this.lastText = text;
+    this.lastLanguage = language;
     this.activeTarget = element;
     this.effects.setHighlight(element);
     this.speech.speak(
       text,
-      getElementLanguage(element) || this.config.locale,
+      language,
       this.state.getRate(),
       {
         onEnd: () => this.finishElement(element),

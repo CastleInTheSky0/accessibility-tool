@@ -1,6 +1,6 @@
 {
   "name": "accessibility-tool",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A zero-runtime-dependency accessibility toolbar for modern websites.",
   "type": "module",
   "main": "./dist/accessibility-tool.min.js",

@@ -27,6 +27,36 @@ describe("PreferenceStore", () => {
     expect(store.load()).toBeNull();
   });
 
+  it("accepts an optional preferred language without breaking v0.1 payloads", () => {
+    const legacyKey = "test:legacy-preferences";
+    localStorage.setItem(
+      legacyKey,
+      JSON.stringify({ version: 1, preferences }),
+    );
+    expect(new PreferenceStore(legacyKey, 1).load()).toEqual(preferences);
+
+    const languagePreferences: PersistedPreferences = {
+      ...preferences,
+      preferredLanguage: "en-US",
+    };
+    const store = new PreferenceStore("test:language-preferences", 1);
+    store.save(languagePreferences);
+    expect(store.load()).toEqual(languagePreferences);
+  });
+
+  it("ignores only a corrupt preferred-language field", () => {
+    const key = "test:invalid-language-preferences";
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        version: 1,
+        preferences: { ...preferences, preferredLanguage: 42 },
+      }),
+    );
+
+    expect(new PreferenceStore(key, 1).load()).toEqual(preferences);
+  });
+
   it("ignores corrupt or incompatible payloads", () => {
     localStorage.setItem("test:corrupt", "not-json");
     expect(new PreferenceStore("test:corrupt", 1).load()).toBeNull();

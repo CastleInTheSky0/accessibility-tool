@@ -40,7 +40,23 @@ function parsePreferences(value: unknown): PersistedPreferences | null {
     return null;
   }
 
-  return candidate as PersistedPreferences;
+  const parsed: PersistedPreferences = {
+    readingEnabled: candidate.readingEnabled,
+    speechRate: candidate.speechRate,
+    colorScheme: candidate.colorScheme,
+    zoom: candidate.zoom,
+    largeCursor: candidate.largeCursor,
+    crosshair: candidate.crosshair,
+    isPinned: candidate.isPinned,
+    isReadScreen: candidate.isReadScreen,
+  };
+  if (
+    typeof candidate.preferredLanguage === "string" &&
+    candidate.preferredLanguage.trim()
+  ) {
+    parsed.preferredLanguage = candidate.preferredLanguage.trim();
+  }
+  return parsed;
 }
 
 export class PreferenceStore {

@@ -220,6 +220,7 @@ export interface PersistedPreferences {
   crosshair: boolean;
   isPinned: boolean;
   isReadScreen: boolean;
+  preferredLanguage?: string;
 }
 
 declare global {

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   getAccessibleText,
-  getElementLanguage,
   getFocusableElements,
   isTabbable,
   isVisible,
@@ -201,7 +200,7 @@ describe("DOM accessibility helpers", () => {
     expect(getAccessibleText(get("own-text"))).toBe("文本：自身内容");
   });
 
-  it("filters hidden ancestors and resolves language fallback", () => {
+  it("filters hidden ancestors", () => {
     document.body.innerHTML = `
       <section hidden><p id="hidden">隐藏</p></section>
       <section lang="en"><p id="english">Hello</p></section>
@@ -209,7 +208,6 @@ describe("DOM accessibility helpers", () => {
 
     expect(isVisible(get("hidden"))).toBe(false);
     expect(isVisible(get("english"))).toBe(true);
-    expect(getElementLanguage(get("english"))).toBe("en");
   });
 
   it("resolves aria-labelledby inside an open Shadow Root", () => {

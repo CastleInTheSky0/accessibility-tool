@@ -392,14 +392,6 @@ function getSelectedTextWithin(element: HTMLElement): string {
   return "";
 }
 
-export function getElementLanguage(element: Element): string {
-  return (
-    element.closest<HTMLElement>("[lang]")?.lang ||
-    element.ownerDocument.documentElement.lang ||
-    "zh-CN"
-  );
-}
-
 export function normalizeText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
