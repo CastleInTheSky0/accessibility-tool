@@ -117,9 +117,54 @@ interface LanguageResolution {
   source: LanguageResolutionSource;
 }
 
+interface PersistedVoicePreference {
+  voiceURI: string;
+  name: string;
+  lang: string;
+}
+
 interface PersistedPreferences {
   // Existing required v0.1 fields remain unchanged.
   preferredLanguage?: string;
+  voice?: PersistedVoicePreference;
+}
+
+// Internal-only catalog boundary; it is not exported from the package entry.
+interface VoiceCatalogCapability {
+  readonly providerId: string;
+  readonly localOnly: boolean;
+  readonly supportsPreview: boolean;
+}
+
+interface LocalVoiceDescriptor extends PersistedVoicePreference {
+  id: string;
+  isDefault: boolean;
+}
+
+interface VoiceCatalogSnapshot {
+  capability: VoiceCatalogCapability;
+  status: "loading" | "ready" | "unsupported";
+  voices: readonly LocalVoiceDescriptor[];
+}
+
+interface VoiceCatalogProvider {
+  readonly capability: VoiceCatalogCapability;
+  start(): void;
+  stop(): void;
+  subscribe(listener: (snapshot: VoiceCatalogSnapshot) => void): () => void;
+  getSnapshot(): VoiceCatalogSnapshot;
+  getCompatibleVoices(language: string): readonly LocalVoiceDescriptor[];
+  resolvePreference(
+    preference: PersistedVoicePreference | null,
+    language: string,
+  ): LocalVoiceDescriptor | null;
+}
+
+interface BrowserNativeVoiceResolver {
+  resolveNativeVoice(
+    preference: PersistedVoicePreference | null,
+    language: string,
+  ): SpeechSynthesisVoice | null;
 }
 ```
 
@@ -137,16 +182,20 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 - The production toolbar uses a closed Shadow Root; `debug: true` uses an open Shadow Root and adds diagnostics. Every completed region scan logs its region count and elapsed time as `[AccessibilityTool] 区域扫描完成：N 个，X.Xms。` so release tests can measure the scanner without adding a public timing API.
 - `open({ trigger })` registers the trigger, manages `aria-controls` / `aria-expanded`, and returns focus to the latest connected trigger on close.
 - Explicit `open()` writes an open intent only after the runtime has opened successfully. Automatic restoration starts the full runtime and hydrates preferences, but must not infer a trigger from `document.activeElement`, move focus, or repeat the "toolbar opened" announcement.
-- The open intent uses an independent, versioned `${storageKey}:open-state` payload. It must not change the existing preference payload or preference version. Persist only reading, speech rate, color scheme, zoom, large cursor, crosshair, pinning, read-screen mode, and the optional normalized preferred language in the preference payload; never persist fullscreen or spoken page text. A v0.1 payload with no language field remains valid, and an invalid optional language field is ignored without discarding valid sibling preferences.
+- The open intent uses an independent, versioned `${storageKey}:open-state` payload. It must not change the existing preference payload or preference version. Persist only reading, speech rate, color scheme, zoom, large cursor, crosshair, pinning, read-screen mode, the optional normalized preferred language, and the optional `{ voiceURI, name, lang }` voice descriptor in the version-1 preference payload; never persist fullscreen, spoken page text, or native `SpeechSynthesisVoice` objects. A v0.1 payload with no language or voice field remains valid, and an invalid optional field is ignored without discarding valid sibling preferences.
 - `close()`, the toolbar exit action, and `destroy()` clear the open intent. `reset()` clears preferences while preserving the current open state and open intent. `persistOpenState: false` clears the current marker and disables restoration.
 - Changing `storageKey` must clear any true marker under the previous key. If the runtime is open and persistence remains enabled, migrate the intent to the new derived key.
 - Restoration covers only same-origin navigation where the destination also loads and configures the same tool script. It does not inject into pages without the script, synchronize tabs in real time, or cross origins.
-- Main toolbar order is fixed by `MAIN_FEATURE_ORDER`; feature flags may remove controls but must not reorder the remaining controls.
-- The desktop toolbar is one fixed-height, single-row blind-path track. Its outer surface and Shadow Host always span the viewport, while one centered inner frame owns the brand rail, active mode controls, and continuous track together; that frame is `width: 100%` with `max-width: 1200px`. Its default height is `146px`; at the 1200px frame each main control is approximately `80-84px` wide with a `38px` icon well, while 1024-1199px uses a compact full-width single-row fallback without horizontal scrolling, clipping, or changes to the roving keyboard model.
+- Main toolbar order is fixed by `MAIN_FEATURE_ORDER`; feature flags may remove controls but must not reorder the remaining controls. The full main toolbar has 14 controls, and `reading`, `speechRate`, `voiceSelection`, and `colorScheme` remain consecutive in that exact order.
+- The desktop toolbar is one fixed-height, single-row blind-path track. Its outer surface and Shadow Host always span the viewport, while one centered inner frame owns the brand rail, active mode controls, and continuous track together; that frame is `width: 100%` with `max-width: 1280px`. Its default height is `146px`; at the 1280px frame each main control is approximately `84px` wide with a `38px` icon well, while 1024-1279px uses a compact full-width single-row fallback without horizontal scrolling, clipping, or changes to the roving keyboard model.
 - The left brand rail is presentation-only: it is `aria-hidden="true"`, contains no `data-toolbar-item`, and never enters the Tab order or accessible toolbar item count. It shows `A11Y / 辅助工具` in main mode and `盲道导航` in read-screen mode.
 - Main and read-screen modes use the same Host, root, and toolbar height. Switching `isReadScreen` must not change push-mode body padding or any configured `offsetSelectors` offset. Read-screen order is exactly the six `REGION_TYPES`, `screenSound`, `help`, `readScreen`, `exit`; `screenSound` keeps its existing action but exposes the visible and accessible name `朗读` with `开启` / `关闭` metadata, and the active read-screen control exposes `当前模式`.
 - Default control surfaces are transparent over one continuous low-contrast track. Icon wells use `--a11y-control-bg`; every `aria-pressed="true"` control uses the same accent surface, accent icon well, and enlarged accent node; exit always uses the danger surface, icon well, and node. Hover remains a restrained dark lift, speech rate has no persistent yellow/accent border, and only genuine `:focus-visible` receives a non-accent high-contrast outline.
 - Speech rate is one direct action button, not a popup trigger. Click, Enter, or Space advances through `[0.75, 1, 1.25, 1.5]`; an exact preset advances to the next value and `1.5` wraps to `0.75`, while a configured or persisted non-preset value advances to the first strictly greater preset or wraps to `0.75` when none exists. The action keeps focus on the toolbar button, commits and persists the new rate, updates its icon state, visible metadata, and accessible name in the same state pass, and announces exactly `当前语速 X 倍` through the live region and active reading speech. It never toggles `readingEnabled`. No rate dialog, preset buttons, range slider, output node, panel state, or `aria-haspopup` / `aria-expanded` / `aria-controls` popup semantics may exist.
+- `voiceSelection` is an independent action/popup control between speech rate and color scheme. It opens an anchored, non-modal `role="dialog"` inside the toolbar Shadow Root without changing the speech-rate action. The panel exposes default-language selection containing the localized common choices plus every unique normalized language in the full current catalog, an `自动选择（推荐）` option, compatible local voices as one radio group, preview, clear-preference, status/privacy text, and a close action. Escape, the close button, and outside interaction close it; explicit panel dismissal returns focus to the connected voice-selection trigger. Closed-Shadow-Root event retargeting must not treat panel interaction as outside interaction, and catalog/selection refreshes preserve the focused radio when it still exists or move focus to the checked fallback. Forced colors and reduced motion must preserve its structure, focus visibility, and operability.
+- The browser-local catalog reads `speechSynthesis.getVoices()`, starts in `loading` when the first list is empty, and refreshes on `voiceschanged`. It exposes only entries whose native `localService` is exactly `true`, normalizes language tags, deduplicates stable descriptors, and orders exact-language matches before same-primary-language matches, then defaults and stable names. The UI never retains native voice objects. Every effective speech or preview request resolves again from the latest native list, first by compatible `voiceURI`, then by `name + normalized lang`; if neither matches, use a compatible native default when present, otherwise leave `utterance.voice` unset for the browser fallback.
+- The catalog/capability seam is internal and source-neutral: consumers depend on `providerId`, `localOnly`, and `supportsPreview`, not browser or vendor fields. v0.2 registers only the `browser-local` provider and the existing browser adapter. This seam is not exported, creates no third-party plugin contract, reads no credentials, includes no cloud SDK or provider voice IDs, and performs no network request; a later approved phase may add another internal provider without changing the v0.2 local behavior.
+- Voice catalog listeners exist only while the runtime is open and are removed on close/destroy. Preview owns only its current speech request: repeating preview cancels the previous preview, while a stale preview completion/cancel callback cannot cancel or complete a newer page-reading request. Closing, resetting, or destroying clears queued preview work and stale callbacks; custom speech adapters keep their existing behavior and receive a clear unavailable explanation instead of browser-local voice controls.
 - Read-screen region controls expose at most one current location with `aria-current="location"` and `data-region-current`, never `aria-pressed`. A successful click, shortcut, or page-focus navigation updates the same `{ type, index, count }` state; the current control shows `index + 1/count`, while every other category continues to show its total count. Returning focus to the toolbar, closing it, clearing navigation, or invalidating the current region removes the location state and restores total-only counts; count/index refreshes alone do not create a new public event.
 - The current read-screen region and every active binary main-mode control use the same track treatment: an accent-filled node separated from an accent outer ring by the toolbar background, plus an independent local accent segment layered above the gray track and below the node. The segment is always present, uses `transform-origin: center`, and transitions between `scaleX(0)` and `scaleX(1)` over `220ms cubic-bezier(0.22, 1, 0.36, 1)`. Multiple binary controls may remain active together; value/action controls and exit must not inherit this state. `prefers-reduced-motion: reduce` disables these node and segment transitions.
 - While open, the toolbar Shadow Host is always `position: fixed` at the top of the viewport, including the default unpinned state and `toolbar.layoutMode: "overlay"`; ordinary document scrolling must not move it away from `top: 0`.
@@ -197,6 +246,7 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 - Every candidate is normalized before use. Replace `_` with `-`, prefer `Intl.getCanonicalLocales()` / `Intl.Locale`, and fall back to deterministic basic BCP 47 casing when `Intl` is missing or throws. Empty or malformed values plus primary languages `und` and `zxx` are unavailable and fall through. Failure always ends at the valid built-in `DEFAULT_CONFIG.locale` and never aborts speech.
 - Text detection is synchronous, local, and dependency-free. Remove tool-authored semantic prefixes, then remove email addresses before generic URL/domain patterns so the URL pass cannot leave an email username behind. Ignore whitespace, numbers, punctuation, emoji, URLs, and email. Count dominant Han, Latin, Hiragana/Katakana, and Hangul signals; require at least two strong characters and a `>= 60%` winning score. Kana allows accompanying Han to count as Japanese; Han-only text falls back to Chinese by design. Ambiguous or unknown text produces no detection and uses the project default.
 - Page-content speech uses the resolver result, while tool-authored region, tabs, toolbar, and status messages continue to use `activeConfig.locale`. A host page's `lang` must never change the language of built-in Chinese templates. `SpeechController` remains unaware of DOM and persistence; both browser and custom adapters receive the final normalized `SpeechRequestOptions.lang`.
+- `BrowserSpeechAdapter` may receive an internal resolver for the current local voice. It assigns `SpeechSynthesisUtterance.voice` only when the freshly resolved native object has `localService === true`; a missing, stale, incompatible, or remote object leaves the property unset. Custom `SpeechAdapter` implementations remain source-neutral and are not given browser-native voice objects.
 - Language is never permanently cached by `Element`. A changed own/ancestor/document `lang`, moved node, changed preferred language, or live `configure({ locale })` value must affect the next request. Duplicate-reading suppression includes the resolved language so the same target and text may be spoken again after its language context changes. No page text, detection result, or language-recognition request is uploaded or persisted.
 
 ### 4. Validation & Error Matrix
@@ -233,6 +283,13 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 | Automatic restoration races with explicit open/close | Serialize the pending open. Explicit open retains trigger/focus/announcement semantics; close waits for the pending restoration, then closes and clears intent. |
 | `localStorage` is unavailable | Continue with in-page memory and no exception. Cross-refresh restoration is unavailable by design. |
 | Stale speech callback after interruption | Ignore it; do not emit a false `error` or `speechend` for the canceled request. |
+| Initial voice list is empty | Keep the voice settings usable and marked loading; refresh from the same catalog when `voiceschanged` arrives. |
+| Voice list contains only remote, malformed, or language-incompatible entries | Expose no selectable local voice, keep automatic selection available, and leave `utterance.voice` unset. |
+| Saved voice is absent after refresh, navigation, or device change | Try compatible `voiceURI`, then `name + normalized lang`, then a compatible native default; otherwise use the browser's default behavior without throwing or deleting valid sibling preferences. |
+| Voice settings use a custom speech adapter or unsupported synthesis | Keep the toolbar entry focusable, explain that browser-local voice selection/preview is unavailable, and do not change the custom adapter contract. |
+| Preview is repeated, panel/runtime closes, preferences reset, or runtime is destroyed | Cancel only the active preview request, remove catalog/panel listeners as applicable, and ignore every stale callback. |
+| A voice-panel pointer event is retargeted through the production closed Shadow Root | The document listener ignores the owning Shadow Host, while a listener inside the owning Shadow Root distinguishes panel/anchor interaction from another toolbar control. Panel interaction stays open; a genuine outside interaction closes it. |
+| The voice catalog refreshes while a radio option owns focus | Restore focus to the option with the same stable ID; if it disappeared, focus the checked fallback instead of dropping keyboard focus into the host page. |
 | Empty, malformed, `und`, or `zxx` language candidate | Skip only that candidate and continue the fixed language priority without emitting a speech error. |
 | `Intl` canonicalization is missing or throws | Use the small deterministic BCP 47 casing fallback; if that also fails, continue to the next candidate. |
 | Optional saved preferred language is corrupt | Ignore only the language field, preserve every valid v0.1 preference field, and omit the invalid language on the next save. |
@@ -248,11 +305,14 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 - Good: a marked region contains native links and buttons; ordinary Tab first shows one yellow outline on the container, and the next Tab produces an orange outer region plus a yellow current descendant, with any host blue focus shadow suppressed. A public registration uses numeric regions and explicit tab/panel pairs, enters the same scanner/tabs pipeline exactly once, and restores every owned attribute through its handle. After an explicit open, a same-origin reload silently restores the toolbar without moving the page's current focus. An `en_US` target inside a Japanese ancestor and Korean iframe document speaks with normalized `en-US`, then immediately follows the next valid source when its own `lang` is removed.
 - Base: an unmarked semantic page is conservatively detected (`nav`, named `form`, `article`, and explicit main/article ARIA roles), while a native `main` tag alone is not classified as a content region; ordinary page focus gets one yellow outline and the host outline returns after close. A missing registration selector is skipped while valid siblings in the same call still register. With no valid open intent, bundle import remains lazy. Unmarked dominant Latin text uses `en-US`; ambiguous mixed text safely uses the configured locale.
 - Bad: sharing one mutation owner between region context and current focus corrupts restoration; using independent per-handle ledgers corrupts out-of-order registration disposal; copying tabs listeners or guessing a panel relationship creates duplicate behavior. Sharing the reading overlay with either focus state lets speech cleanup erase navigation context; intercepting Tab, auto-tabbing readable tags, overriding author `tabindex`, flattening composite widgets into multiple Tab stops, restoring before final pre-DOMContentLoaded configuration, or focusing/announcing during automatic restoration is forbidden. Language resolution must not use only `closest("[lang]")`, hard-code `zh-CN`, permanently cache by element, upload text, or let host language override tool-authored messages.
+- Good (voice): an initially empty browser catalog remains loading, then a `voiceschanged` refresh exposes every compatible local language and voice. The UI persists only a descriptor, while the separate native resolver obtains the latest matching `SpeechSynthesisVoice` for each request and preserves panel/radio focus through refreshes.
+- Base (voice): no compatible local voice, a missing saved descriptor, or a custom adapter leaves `utterance.voice` unset and keeps the existing speech path usable with an explicit status explanation.
+- Bad (voice): caching a native voice, exposing a remote entry, typing runtime consumers to `BrowserLocalVoiceCatalog`, relying only on a document-level outside-click listener for a closed Shadow Root, or replacing a focused radio list without deterministic focus restoration is forbidden.
 
 ### 6. Tests Required
 
 - Unit: config deep merge and immutable feature order.
-- Unit: preference and independent open-state storage validation, optional preferred-language compatibility/isolation, version rejection, clear, and unavailable-storage fallback.
+- Unit: preference and independent open-state storage validation, optional preferred-language and voice-descriptor compatibility/isolation, version rejection, clear, and unavailable-storage fallback.
 - Unit: successful open/close/destroy/reset intent lifecycle, disabled persistence, storage-key migration, failed-open cleanup, silent final-config restoration, and explicit-open/close races with pending restoration.
 - Unit: accessible-name empty-value fallback and fixed priority, target-contained versus unrelated selections, area/image-input `alt`, unnamed ARIA select current-option fallback, native/equivalent-ARIA semantic prefixes including `输入框：`, generic `文本：` output, `aria-current="false"`, control state text, hidden content, and Shadow Root `aria-labelledby`.
 - Unit: region source priority, numeric/English/legacy mapping, semantic-off mode, explicitly classified visible/hidden tab panels and source-tab name fallback in ordinary DOM/open Shadow Roots/same-origin iframes, safe history restoration, current-region wrap and reclassification recovery.
@@ -261,13 +321,15 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 - Unit: exact tab/link/no-region speech templates; every-focus announcements without selection states; scanned category lookup across ordinary DOM, open Shadow Roots, and same-origin iframe documents; listener-order-independent generic-reading suppression; per-option automatic/manual activation; trigger-event fallback/deduplication; shared/timeout-safe host activation for hidden panel regions; stale region-navigation suppression; host-owned `data-a11y-hidden` panels without native `hidden`; focusable/static panel entry using the panel's own category; host-driven intermediate focus during entry/exit; normal descendant reading after entry; concurrent-operation deduplication; successful and failed Escape return; and non-modal dialog focus behavior.
 - Unit: public tab registration covers the flat signature, selector multi-match DOM-order pairing, count-mismatch isolation, direct-parent tablist inference and cross-parent splitting, conflicting-pair isolation, generated/reused IDs, per-tab behavior attributes, shared tab/panel region/name metadata, `data-a11y-hidden` without native `hidden` mutation, layered overlapping disposal, and destroy cleanup.
 - Unit: interrupted speech must not emit stale errors.
+- Unit: browser-local voice catalog covers initial empty/synchronous lists, `voiceschanged`, local-only filtering, malformed/duplicate entries, exact and primary-language ordering, current-object re-resolution, capability snapshots, subscriber cleanup, `voiceURI` then `name + lang` recovery, compatible-default fallback, and no-match browser fallback.
+- Unit: browser speech forwards only a freshly resolved local native voice; remote or stale matches remain unset. Repeated preview, close, reset, destroy, and current-request cancellation never let an older callback cancel or complete newer reading.
 - Unit: language-tag normalization covers casing, underscores, script/region subtags, unavailable/malformed values, and `Intl` absence. Resolution covers all six priority levels, invalid-candidate fallthrough, open Shadow Root host ancestry, owner-document isolation, dynamic DOM/config/preference changes, and safe final fallback. Text detection covers Chinese, Latin, Japanese kana plus Han, Hangul, two-character/60% thresholds, semantic prefixes, URLs/domains/email preprocessing, Han-only ambiguity, and unknown/ignored content.
 - Unit: hidden features must be consistent between main and read-screen toolbars.
 - Unit: the brand rail stays `aria-hidden` and outside toolbar navigation; read-screen controls keep their exact order, region counts remain independent from `ALT + 1` through `ALT + 6` metadata, `screenSound` uses the `朗读` name/status, and active read-screen mode exposes `当前模式`.
 - Unit: current-region notifications set one `aria-current="location"` control, render `index + 1/count`, follow click/shortcut/page-focus navigation, refresh without extra public events, and clear on invalidation, toolbar return, close, and navigation reset.
-- Unit: all switch icons follow their final pressed state, reading and read-screen sound share identical artwork, all five palettes are distinct, the rate indicator changes with its current value, direct rate activation covers the complete preset wrap plus non-preset values with no dialog semantics, and zoom artwork stays fixed while its metadata changes; all SVG accessibility attributes remain intact.
+- Unit: all switch icons follow their final pressed state, reading and read-screen sound share identical artwork, all five palettes are distinct, the rate indicator changes with its current value, direct rate activation covers the complete preset wrap plus non-preset values with no dialog semantics, voice selection remains a separate popup action between rate and color, closed-Shadow-Root pointer retargeting keeps panel interaction open while real outside interaction closes it, voice-list refresh preserves the same focused radio or the checked fallback, and zoom artwork stays fixed while its metadata changes; all SVG accessibility attributes remain intact.
 - E2E: lazy open, fixed order, roving toolbar keyboard model, immediate pinned pointer-leave collapse with scroll-stable reveal-focus transfer in both main and read-screen modes, delayed keyboard focusout collapse, reveal/top-edge/shortcut expansion, persisted pinned + read-screen restoration, and collapse/expand visibility timing in normal and reduced-motion modes, plus zoom isolation, reset, and Fullscreen API.
-- E2E: at 2048px, 1440px, and 1200px all 13 main controls stay on one row at the desktop target size; the outer toolbar remains viewport-wide while the shared brand/control/track frame is exactly capped at 1200px, horizontally centered, and fully contains both the brand rail and exit control. At 1024px the frame fills the available width, controls stay on one compact row, and keyboard navigation can still reach and invoke exit. Main/read-screen Host, root, toolbar, frame, body padding, and configured offset values remain equal across mode switches.
+- E2E: at 2048px, 1440px, and 1280px all 14 main controls stay on one row at the desktop target size; the outer toolbar remains viewport-wide while the shared brand/control/track frame is exactly capped at 1280px, horizontally centered, and fully contains both the brand rail and exit control. At 1200px and 1024px the frame fills the available width, controls stay on one compact row, and keyboard navigation can still reach and invoke exit. Main/read-screen Host, root, toolbar, frame, body padding, and configured offset values remain equal across mode switches.
 - E2E: default surfaces are transparent, active reading and pinning share the same accent treatment, exit uses danger treatment, speech rate has no persistent accent border, and keyboard-driven `:focus-visible` is high contrast and not the accent color.
 - E2E: a current read-screen region and concurrently active binary main controls show the accent-filled node, background gap, accent outer ring, and center-expanding local segment; value/action controls and exit remain isolated, and reduced-motion removes the transitions.
 - E2E: click, Enter, and Space directly cycle speech rate through the full preset wrap from exact and non-preset values without creating a dialog; state, persistence, icon, metadata, accessible name, live/synthesized announcement, focus, and pinned collapse remain synchronized. Switch and palette icon states stay synchronized through user actions, reset, persisted restoration, and browser-driven fullscreen exit; zoom percentages update without changing the fixed magnifier artwork; both crosshair axes use the default or configured danger color as pure `3px` lines with no border, outline, or shadow and do not accept pointer events.
@@ -280,6 +342,7 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 - E2E: Tab, Shift+Tab, arrow, script, Alt+ArrowDown, and Escape produce the exact single tab/panel/return live message; static panels gain no descendant tab stops; ordinary DOM, open Shadow Roots, and same-origin iframe tabs use their scanned region category.
 - E2E: public registrations made before and after open immediately enter native region navigation; selector multi-match and Element targets restore through their own handles. Dynamically registered paired tabs use the existing Tab/Shift+Tab, original-event, Alt+Down, Escape, and hidden-panel region-shortcut pipeline exactly once, while overlapping handles preserve generated IDs and region counts until the final disposal.
 - E2E: a deterministic custom speech adapter captures the final normalized `lang` for target, ancestor, document, saved-preference, local text, and project-default sources. Chrome and Edge cover dynamic `lang` removal, open Shadow Root host inheritance, same-origin iframe owner-document language, and ambiguous-text fallback without depending on installed operating-system voices.
+- E2E: deterministic browser speech fixtures cover initial empty voices plus `voiceschanged`, local-only filtering, language changes, automatic/local selection, persisted restoration, actual `utterance.voice`, preview replacement, missing saved voices, custom-adapter unavailability, and listener cleanup. Chrome and Edge verify the 14-control order plus voice-panel keyboard entry, Escape/close/outside dismissal, focus return, forced-colors/reduced-motion behavior, and the absence of tool-originated remote speech requests or vendor configuration.
 - E2E: open Shadow Roots, same-origin iframes, strict CSP, scroll/resize, and forced-colors preserve direct-node outline ownership without focus/region geometry overlays.
 - E2E: hostile CSS isolation, strict CSP external styles, closed production Shadow Root, semantic-off configuration, and no new serious/critical axe violations.
 - E2E: Chrome and Edge create a visible 2000-node fixture before opening the tool, parse the first debug scan diagnostic, assert at least 50 recognized regions, and require the measured initial scan to be `<= 100ms`. Firefox and WebKit skip this timing assertion while retaining the full functional scanner suite.
@@ -346,6 +409,14 @@ const language =
 for (const [index, item] of descendants.entries()) {
   item.tabIndex = index + 1;
 }
+
+// Leaks the browser implementation through the catalog seam, caches a native
+// object that may be replaced, and misclassifies closed-root panel clicks.
+const catalog: BrowserLocalVoiceCatalog = createCatalog();
+const cachedVoice = speechSynthesis.getVoices()[0];
+document.addEventListener("pointerdown", (event) => {
+  if (!event.composedPath().includes(voicePanel)) closeVoicePanel();
+});
 ```
 
 #### Correct
@@ -457,4 +528,15 @@ if (!regionNavigation.isRegionContainer(element)) {
     rate,
   );
 }
+
+// Keep the serializable catalog and native-object resolver as separate
+// internal capabilities. Resolve the current native object per request, and
+// classify closed-root pointer interaction inside the owning Shadow Root.
+const { catalog, nativeVoiceResolver } = createBrowserLocalVoiceRuntime();
+const descriptor = catalog.resolvePreference(savedVoice, language);
+const nativeVoice = nativeVoiceResolver.resolveNativeVoice(
+  savedVoice,
+  language,
+);
+owningShadowRoot.addEventListener("pointerdown", classifyVoicePanelPointer, true);
 ```
