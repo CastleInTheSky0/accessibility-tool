@@ -87,6 +87,27 @@ AccessibilityTool.configure({
 <section data-a11y-ignore>不会扫描或朗读</section>
 ```
 
+## 页面朗读语言标记
+
+接入页面应优先使用标准 HTML `lang` 标记真实内容语言。工具按“当前元素 → 最近组合树祖先 → 当前文档根元素”的顺序读取显式标记，再进入本地偏好、文本检测和项目默认语言回退。
+
+```html
+<html lang="zh-CN">
+  <article>
+    <p>中文正文</p>
+    <blockquote lang="en-US">English quotation</blockquote>
+  </article>
+</html>
+```
+
+- 推荐使用标准 BCP 47 标签，例如 `zh-CN`、`zh-Hant`、`en-US`、`ja-JP`、`ko-KR`。
+- 工具会兼容 `en_US` 等下划线写法并规范化大小写，但新页面仍应使用标准连字符。
+- 空值、非法标签、`und` 和 `zxx` 会被视为没有可用语言，并继续下一级回退。
+- open Shadow Root 内部节点可以继承 Shadow Root 内祖先或 host 的 `lang`。关闭式 Shadow Root 仍受原有发现边界限制。
+- 同源 iframe 内节点读取 iframe 自己的 `document.documentElement.lang`；不会使用外层文档语言覆盖。跨域 iframe 仍不可读取。
+- 动态修改节点／祖先的 `lang`，或把节点移动到另一语言祖先后，下一次朗读会重新解析，不需要刷新工具。
+- 混合文本的一次语音请求只使用一个语言。没有显式标记时，主导脚本不足 60% 会回退项目 `locale`；纯汉字日文无法可靠区分，必须显式使用 `lang="ja"`。
+
 ## 选项卡属性
 
 标准关联必须使用 `aria-controls` 与 ID：

@@ -94,6 +94,35 @@ interface ReadingOverlayController {
 }
 ```
 
+Internal page-content language resolution uses these signatures:
+
+```ts
+type LanguageResolutionSource =
+  | "element"
+  | "ancestor"
+  | "document"
+  | "preference"
+  | "text"
+  | "project-default";
+
+interface ResolveSpeechLanguageInput {
+  element?: Element | null;
+  text: string;
+  preferredLanguage?: string | null;
+  projectDefault: string;
+}
+
+interface LanguageResolution {
+  language: string;
+  source: LanguageResolutionSource;
+}
+
+interface PersistedPreferences {
+  // Existing required v0.1 fields remain unchanged.
+  preferredLanguage?: string;
+}
+```
+
 ### 3. Contracts
 
 Configuration precedence is:
@@ -108,7 +137,7 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 - The production toolbar uses a closed Shadow Root; `debug: true` uses an open Shadow Root and adds diagnostics. Every completed region scan logs its region count and elapsed time as `[AccessibilityTool] 区域扫描完成：N 个，X.Xms。` so release tests can measure the scanner without adding a public timing API.
 - `open({ trigger })` registers the trigger, manages `aria-controls` / `aria-expanded`, and returns focus to the latest connected trigger on close.
 - Explicit `open()` writes an open intent only after the runtime has opened successfully. Automatic restoration starts the full runtime and hydrates preferences, but must not infer a trigger from `document.activeElement`, move focus, or repeat the "toolbar opened" announcement.
-- The open intent uses an independent, versioned `${storageKey}:open-state` payload. It must not change the existing preference payload or preference version. Persist only reading, speech rate, color scheme, zoom, large cursor, crosshair, pinning, and read-screen mode in the preference payload; never persist fullscreen or spoken page text.
+- The open intent uses an independent, versioned `${storageKey}:open-state` payload. It must not change the existing preference payload or preference version. Persist only reading, speech rate, color scheme, zoom, large cursor, crosshair, pinning, read-screen mode, and the optional normalized preferred language in the preference payload; never persist fullscreen or spoken page text. A v0.1 payload with no language field remains valid, and an invalid optional language field is ignored without discarding valid sibling preferences.
 - `close()`, the toolbar exit action, and `destroy()` clear the open intent. `reset()` clears preferences while preserving the current open state and open intent. `persistOpenState: false` clears the current marker and disables restoration.
 - Changing `storageKey` must clear any true marker under the previous key. If the runtime is open and persistence remains enabled, migrate the intent to the new derived key.
 - Restoration covers only same-origin navigation where the destination also loads and configures the same tool script. It does not inject into pages without the script, synchronize tabs in real time, or cross origins.
@@ -164,6 +193,11 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 - `Alt+ArrowDown` enters the linked panel after it becomes visible and focuses the panel container without changing descendant Tab order. Entry announces exactly `您已进入<选项名称><区域分类>标签面板，按 Tab 键遍历信息，按 Esc 键退出面板并返回<选项名称>选项`; the category comes from the linked panel's own live explicit region classification, not from the tab's containing region. If no descendant is currently tabbable, replace the traversal clause with `当前面板暂无可通过 Tab 遍历的信息` and never add `tabindex` to static descendants. When that panel is also a region container, Alt+Down suppresses the synchronous generic region-entry announcement so only the panel-specific message is spoken; ordinary region focus still uses the complete region instruction. Host activation may move focus into a panel descendant before the tool focuses the container, so the complete composed panel subtree is temporarily excluded from ordinary reading for the duration of that entry operation; after entry completes, descendants immediately resume ordinary semantic reading. `Escape` similarly owns a temporary exit suppression window before invoking host close behavior, so a host that proactively focuses the originating tab cannot emit the full tab message before the short return message. Concurrent entry/exit attempts for the same panel are ignored. Escape announces exactly `已返回<选项名称>选项` only after any required dialog close succeeds and the originating tab truly owns focus. A failed close or focus return must not announce success. Only modal dialogs trap Tab.
 - Mutation observers batch page changes by `regions.mutationDebounceMs`; observers, reading listeners, pointer listeners, and shortcuts must be detached while closed.
 - Theme customization is limited to typed `toolbar.theme` variables. Arbitrary CSS injection is not part of the API.
+- Host-page content speech resolves language immediately before every effective request in this fixed order: target element `lang` > nearest valid composed-tree ancestor `lang` > the target owner document's `documentElement.lang` > optional saved preferred language > local text-script detection > active `locale`. The document root is reported as the document source rather than an ordinary ancestor. Open Shadow Root ancestry continues through its host; same-origin iframe content uses its own owner document and never guesses from the outer document.
+- Every candidate is normalized before use. Replace `_` with `-`, prefer `Intl.getCanonicalLocales()` / `Intl.Locale`, and fall back to deterministic basic BCP 47 casing when `Intl` is missing or throws. Empty or malformed values plus primary languages `und` and `zxx` are unavailable and fall through. Failure always ends at the valid built-in `DEFAULT_CONFIG.locale` and never aborts speech.
+- Text detection is synchronous, local, and dependency-free. Remove tool-authored semantic prefixes, then remove email addresses before generic URL/domain patterns so the URL pass cannot leave an email username behind. Ignore whitespace, numbers, punctuation, emoji, URLs, and email. Count dominant Han, Latin, Hiragana/Katakana, and Hangul signals; require at least two strong characters and a `>= 60%` winning score. Kana allows accompanying Han to count as Japanese; Han-only text falls back to Chinese by design. Ambiguous or unknown text produces no detection and uses the project default.
+- Page-content speech uses the resolver result, while tool-authored region, tabs, toolbar, and status messages continue to use `activeConfig.locale`. A host page's `lang` must never change the language of built-in Chinese templates. `SpeechController` remains unaware of DOM and persistence; both browser and custom adapters receive the final normalized `SpeechRequestOptions.lang`.
+- Language is never permanently cached by `Element`. A changed own/ancestor/document `lang`, moved node, changed preferred language, or live `configure({ locale })` value must affect the next request. Duplicate-reading suppression includes the resolved language so the same target and text may be spoken again after its language context changes. No page text, detection result, or language-recognition request is uploaded or persisted.
 
 ### 4. Validation & Error Matrix
 
@@ -199,6 +233,11 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 | Automatic restoration races with explicit open/close | Serialize the pending open. Explicit open retains trigger/focus/announcement semantics; close waits for the pending restoration, then closes and clears intent. |
 | `localStorage` is unavailable | Continue with in-page memory and no exception. Cross-refresh restoration is unavailable by design. |
 | Stale speech callback after interruption | Ignore it; do not emit a false `error` or `speechend` for the canceled request. |
+| Empty, malformed, `und`, or `zxx` language candidate | Skip only that candidate and continue the fixed language priority without emitting a speech error. |
+| `Intl` canonicalization is missing or throws | Use the small deterministic BCP 47 casing fallback; if that also fails, continue to the next candidate. |
+| Optional saved preferred language is corrupt | Ignore only the language field, preserve every valid v0.1 preference field, and omit the invalid language on the next save. |
+| Text has fewer than two strong characters, no 60% winner, or only ignored content | Return no detection and use the normalized project default language. |
+| Target or ancestor `lang`, DOM ancestry, saved preference, or configured locale changes | Re-resolve on the next effective request; never reuse an element-cached result. |
 | Page selection is outside the reading target | Ignore that selection and continue the target's documented name fallback; never read unrelated selected text. |
 | Unnamed ARIA combobox/listbox has no valid active or selected option | Keep the semantic-only `下拉框` fallback; do not read an unrelated option or throw. |
 | Cross-origin iframe | Never read its document; treat the iframe element as atomic only when explicitly configured or marked. |
@@ -206,14 +245,14 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 
 ### 5. Good / Base / Bad Cases
 
-- Good: a marked region contains native links and buttons; ordinary Tab first shows one yellow outline on the container, and the next Tab produces an orange outer region plus a yellow current descendant, with any host blue focus shadow suppressed. A public registration uses numeric regions and explicit tab/panel pairs, enters the same scanner/tabs pipeline exactly once, and restores every owned attribute through its handle. After an explicit open, a same-origin reload silently restores the toolbar without moving the page's current focus.
-- Base: an unmarked semantic page is conservatively detected (`nav`, named `form`, `article`, and explicit main/article ARIA roles), while a native `main` tag alone is not classified as a content region; ordinary page focus gets one yellow outline and the host outline returns after close. A missing registration selector is skipped while valid siblings in the same call still register. With no valid open intent, bundle import remains lazy.
-- Bad: sharing one mutation owner between region context and current focus corrupts restoration; using independent per-handle ledgers corrupts out-of-order registration disposal; copying tabs listeners or guessing a panel relationship creates duplicate behavior. Sharing the reading overlay with either focus state lets speech cleanup erase navigation context; intercepting Tab, auto-tabbing readable tags, overriding author `tabindex`, flattening composite widgets into multiple Tab stops, restoring before final pre-DOMContentLoaded configuration, or focusing/announcing during automatic restoration is forbidden.
+- Good: a marked region contains native links and buttons; ordinary Tab first shows one yellow outline on the container, and the next Tab produces an orange outer region plus a yellow current descendant, with any host blue focus shadow suppressed. A public registration uses numeric regions and explicit tab/panel pairs, enters the same scanner/tabs pipeline exactly once, and restores every owned attribute through its handle. After an explicit open, a same-origin reload silently restores the toolbar without moving the page's current focus. An `en_US` target inside a Japanese ancestor and Korean iframe document speaks with normalized `en-US`, then immediately follows the next valid source when its own `lang` is removed.
+- Base: an unmarked semantic page is conservatively detected (`nav`, named `form`, `article`, and explicit main/article ARIA roles), while a native `main` tag alone is not classified as a content region; ordinary page focus gets one yellow outline and the host outline returns after close. A missing registration selector is skipped while valid siblings in the same call still register. With no valid open intent, bundle import remains lazy. Unmarked dominant Latin text uses `en-US`; ambiguous mixed text safely uses the configured locale.
+- Bad: sharing one mutation owner between region context and current focus corrupts restoration; using independent per-handle ledgers corrupts out-of-order registration disposal; copying tabs listeners or guessing a panel relationship creates duplicate behavior. Sharing the reading overlay with either focus state lets speech cleanup erase navigation context; intercepting Tab, auto-tabbing readable tags, overriding author `tabindex`, flattening composite widgets into multiple Tab stops, restoring before final pre-DOMContentLoaded configuration, or focusing/announcing during automatic restoration is forbidden. Language resolution must not use only `closest("[lang]")`, hard-code `zh-CN`, permanently cache by element, upload text, or let host language override tool-authored messages.
 
 ### 6. Tests Required
 
 - Unit: config deep merge and immutable feature order.
-- Unit: preference and independent open-state storage validation, version rejection, clear, and unavailable-storage fallback.
+- Unit: preference and independent open-state storage validation, optional preferred-language compatibility/isolation, version rejection, clear, and unavailable-storage fallback.
 - Unit: successful open/close/destroy/reset intent lifecycle, disabled persistence, storage-key migration, failed-open cleanup, silent final-config restoration, and explicit-open/close races with pending restoration.
 - Unit: accessible-name empty-value fallback and fixed priority, target-contained versus unrelated selections, area/image-input `alt`, unnamed ARIA select current-option fallback, native/equivalent-ARIA semantic prefixes including `输入框：`, generic `文本：` output, `aria-current="false"`, control state text, hidden content, and Shadow Root `aria-labelledby`.
 - Unit: region source priority, numeric/English/legacy mapping, semantic-off mode, explicitly classified visible/hidden tab panels and source-tab name fallback in ordinary DOM/open Shadow Roots/same-origin iframes, safe history restoration, current-region wrap and reclassification recovery.
@@ -222,6 +261,7 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 - Unit: exact tab/link/no-region speech templates; every-focus announcements without selection states; scanned category lookup across ordinary DOM, open Shadow Roots, and same-origin iframe documents; listener-order-independent generic-reading suppression; per-option automatic/manual activation; trigger-event fallback/deduplication; shared/timeout-safe host activation for hidden panel regions; stale region-navigation suppression; host-owned `data-a11y-hidden` panels without native `hidden`; focusable/static panel entry using the panel's own category; host-driven intermediate focus during entry/exit; normal descendant reading after entry; concurrent-operation deduplication; successful and failed Escape return; and non-modal dialog focus behavior.
 - Unit: public tab registration covers the flat signature, selector multi-match DOM-order pairing, count-mismatch isolation, direct-parent tablist inference and cross-parent splitting, conflicting-pair isolation, generated/reused IDs, per-tab behavior attributes, shared tab/panel region/name metadata, `data-a11y-hidden` without native `hidden` mutation, layered overlapping disposal, and destroy cleanup.
 - Unit: interrupted speech must not emit stale errors.
+- Unit: language-tag normalization covers casing, underscores, script/region subtags, unavailable/malformed values, and `Intl` absence. Resolution covers all six priority levels, invalid-candidate fallthrough, open Shadow Root host ancestry, owner-document isolation, dynamic DOM/config/preference changes, and safe final fallback. Text detection covers Chinese, Latin, Japanese kana plus Han, Hangul, two-character/60% thresholds, semantic prefixes, URLs/domains/email preprocessing, Han-only ambiguity, and unknown/ignored content.
 - Unit: hidden features must be consistent between main and read-screen toolbars.
 - Unit: the brand rail stays `aria-hidden` and outside toolbar navigation; read-screen controls keep their exact order, region counts remain independent from `ALT + 1` through `ALT + 6` metadata, `screenSound` uses the `朗读` name/status, and active read-screen mode exposes `当前模式`.
 - Unit: current-region notifications set one `aria-current="location"` control, render `index + 1/count`, follow click/shortcut/page-focus navigation, refresh without extra public events, and clear on invalidation, toolbar return, close, and navigation reset.
@@ -239,6 +279,7 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 - E2E: ordinary Tab reaches recognized region containers before their descendants; category selection uses the same anchors; native Tab shows orange region context plus yellow descendant focus; Shift+Tab returns through the region anchor; dynamic invalidation and close/destroy restore all temporary tab stops.
 - E2E: Tab, Shift+Tab, arrow, script, Alt+ArrowDown, and Escape produce the exact single tab/panel/return live message; static panels gain no descendant tab stops; ordinary DOM, open Shadow Roots, and same-origin iframe tabs use their scanned region category.
 - E2E: public registrations made before and after open immediately enter native region navigation; selector multi-match and Element targets restore through their own handles. Dynamically registered paired tabs use the existing Tab/Shift+Tab, original-event, Alt+Down, Escape, and hidden-panel region-shortcut pipeline exactly once, while overlapping handles preserve generated IDs and region counts until the final disposal.
+- E2E: a deterministic custom speech adapter captures the final normalized `lang` for target, ancestor, document, saved-preference, local text, and project-default sources. Chrome and Edge cover dynamic `lang` removal, open Shadow Root host inheritance, same-origin iframe owner-document language, and ambiguous-text fallback without depending on installed operating-system voices.
 - E2E: open Shadow Roots, same-origin iframes, strict CSP, scroll/resize, and forced-colors preserve direct-node outline ownership without focus/region geometry overlays.
 - E2E: hostile CSS isolation, strict CSP external styles, closed production Shadow Root, semantic-off configuration, and no new serious/critical axe violations.
 - E2E: Chrome and Edge create a visible 2000-node fixture before opening the tool, parse the first debug scan diagnostic, assert at least 50 recognized regions, and require the measured initial scan to be `<= 100ms`. Firefox and WebKit skip this timing assertion while retaining the full functional scanner suite.
@@ -295,6 +336,11 @@ effects.setHighlight(activeRegion);
 // Generic reading can cancel the complete region instruction and loses the
 // requested semantic wording for links, images, controls, and plain text.
 speech.speak(`文本：${element.textContent ?? ""}`, locale, rate);
+
+// Ignores saved preference, text detection, Shadow hosts, normalization, and
+// live language changes while duplicating a hard-coded fallback.
+const language =
+  element.closest("[lang]")?.getAttribute("lang") ?? "zh-CN";
 
 // Reorders the host page instead of following its native focus model.
 for (const [index, item] of descendants.entries()) {
@@ -398,9 +444,16 @@ activeRegion.focus({ preventScroll: true });
 // Region containers own the complete entry instruction; ordinary reading
 // skips that exact container and formats every descendant by its semantics.
 if (!regionNavigation.isRegionContainer(element)) {
+  const text = getAccessibleText(element);
+  const language = resolveSpeechLanguage({
+    element,
+    text,
+    preferredLanguage: getPreferredLanguage(),
+    projectDefault: activeConfig.locale,
+  }).language;
   speech.speak(
-    getAccessibleText(element),
-    getElementLanguage(element),
+    text,
+    language,
     rate,
   );
 }
