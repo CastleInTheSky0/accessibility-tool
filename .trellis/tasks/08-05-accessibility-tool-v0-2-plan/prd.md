@@ -9,7 +9,8 @@
 - 产品阶段范围以 `docs/product-roadmap.md` 为权威。
 - 本地目录固定为 `D:\前端\工具\无障碍辅助工具\accessibility-tool`。
 - 二期集成分支为 `feat/accessibility-tool-v0.2`，从已完成 `dom-region-registration` 的 `2bc1930` 基线开始。
-- `main` 继续保留 v0.1.0 发布基线；二期功能分支以 `feat/accessibility-tool-v0.2` 为 PR 目标。
+- `main` 继续保留 v0.1.0 发布基线；二期所有功能直接顺序提交到 `feat/accessibility-tool-v0.2`，最终由该分支面向 `main` 完成二期集成。
+- 六个子任务不再创建独立 Git 分支；独立性由 Trellis 任务、PRD、提交范围、测试记录和归档状态保证。
 - 二期开始实现时把 `package.json` 版本调整为 `0.2.0`；npm 包名、IIFE 全局名和既有公共 API 名称不变。
 - 不提前创建 `v0.2.0` Git 标签，不强制推送，不删除 `v0.1.0` 标签。
 
@@ -24,18 +25,18 @@
 5. 移动端专用布局
 6. 平板端专用布局
 
-每项功能必须拥有独立 PRD、独立 feature 分支、独立验收标准、Definition of Done、单元测试计划、E2E 计划和文档更新计划。前一项完成验证并处理 Trellis 状态后，才能进入下一项。
+每项功能必须拥有独立 PRD、独立验收标准、Definition of Done、单元测试计划、E2E 计划和文档更新计划。所有功能共用 `feat/accessibility-tool-v0.2` 工作分支；前一项完成提交、验证并处理 Trellis 状态后，才能在同一分支进入下一项，禁止并行混入多个功能。
 
 ## Task Decomposition
 
-| 顺序 | Trellis 任务 | 分支 | PR 目标 | 当前阶段 |
+| 顺序 | Trellis 任务 | 工作分支 | 最终 PR 目标 | 当前阶段 |
 | --- | --- | --- | --- | --- |
-| 1 | `08-05-language-detection` | `feat/language-detection` | `feat/accessibility-tool-v0.2` | 完整 PRD，等待确认 |
-| 2 | `08-05-voice-selection` | `feat/voice-selection` | `feat/accessibility-tool-v0.2` | PRD 框架 |
-| 3 | `08-05-continuous-reading` | `feat/continuous-reading` | `feat/accessibility-tool-v0.2` | PRD 框架 |
-| 4 | `08-05-large-caption` | `feat/large-caption` | `feat/accessibility-tool-v0.2` | PRD 框架 |
-| 5 | `08-05-mobile-layout` | `feat/mobile-layout` | `feat/accessibility-tool-v0.2` | 仅设计规划，禁止实现 |
-| 6 | `08-05-tablet-layout` | `feat/tablet-layout` | `feat/accessibility-tool-v0.2` | 仅设计规划，禁止实现 |
+| 1 | `08-05-language-detection` | `feat/accessibility-tool-v0.2` | `main` | 已完成并归档 |
+| 2 | `08-05-voice-selection` | `feat/accessibility-tool-v0.2` | `main` | PRD 框架 |
+| 3 | `08-05-continuous-reading` | `feat/accessibility-tool-v0.2` | `main` | PRD 框架 |
+| 4 | `08-05-large-caption` | `feat/accessibility-tool-v0.2` | `main` | PRD 框架 |
+| 5 | `08-05-mobile-layout` | `feat/accessibility-tool-v0.2` | `main` | 仅设计规划，禁止实现 |
+| 6 | `08-05-tablet-layout` | `feat/accessibility-tool-v0.2` | `main` | 仅设计规划，禁止实现 |
 
 ## Dependency Analysis
 
@@ -89,9 +90,9 @@
 
 风险控制：
 
-- 每个 feature 分支只包含当前功能及必要的共享基础改动。
-- 每项功能合入二期集成分支后，下一项才从更新后的集成分支创建。
-- 若实现中发现上一项契约不足，返回上一任务补 PRD 和验证，不在当前分支偷偷补齐另一功能。
+- `feat/accessibility-tool-v0.2` 同一时间只允许一个功能任务进入生产实现；每个提交批次只包含当前任务及必要共享基础改动。
+- 当前任务完成提交、验证和归档后，下一项才在该分支最新提交上启动，不创建新的功能分支。
+- 若实现中发现上一项契约不足，返回上一任务补 PRD、提交和验证，不在当前任务提交中偷偷补齐另一功能。
 - 移动／平板任务在设计获明确确认前不得修改 `src/`、正式 `public/` 页面结构、运行时 CSS、公共 API 或构建产物。
 
 ## Cross-cutting Requirements
@@ -114,7 +115,7 @@
 ## Overall Acceptance Criteria
 
 - [ ] 六项功能分别拥有独立 Trellis 任务和 PRD。
-- [ ] 每项功能只在自己的 feature 分支开发并依次合入二期集成分支。
+- [ ] 六项功能按既定顺序直接提交到 `feat/accessibility-tool-v0.2`，同一时间不混入多个功能任务。
 - [ ] 六项功能均通过各自单元、E2E、类型、lint、构建和人工测试门禁。
 - [ ] 手机和平板均有规定尺寸的设计稿和两轮明确确认记录后才进入生产实现。
 - [ ] 二期产物默认不联网，不包含任何三期代码、密钥、远程请求或 Node.js 网关。
@@ -125,6 +126,7 @@
 ## Definition of Done
 
 - 六个子任务全部完成、验证并归档。
+- 所有二期工作提交均位于 `feat/accessibility-tool-v0.2`，不存在功能专用长期分支。
 - `pnpm typecheck`、`pnpm lint`、`pnpm test`、`pnpm build`、`pnpm test:e2e` 全部通过。
 - Chrome、Edge 自动化通过；Firefox、Safari、NVDA、VoiceOver 按人工测试清单记录结果。
 - 移动端和平板端设计确认记录可追溯。

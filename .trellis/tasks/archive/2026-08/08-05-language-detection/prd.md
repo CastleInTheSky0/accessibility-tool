@@ -244,4 +244,4 @@ interface LanguageResolution {
 
 ## Confirmation Gate
 
-本 PRD 获用户明确确认后，才进行上下文 JSONL 配置、`task.py start`、feature 分支创建和生产实现。
+本 PRD 获用户明确确认后，才进行上下文 JSONL 配置、`task.py start`，并在共享 `feat/accessibility-tool-v0.2` 分支开始生产实现；不创建功能专用 Git 分支。
