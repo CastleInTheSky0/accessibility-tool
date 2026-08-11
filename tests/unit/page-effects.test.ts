@@ -281,6 +281,7 @@ function createState(
     isCollapsed: false,
     isReadScreen: false,
     readingEnabled: false,
+    continuousReadingState: "idle",
     speechRate: 1,
     colorScheme: "original",
     zoom: 1,

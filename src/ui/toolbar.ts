@@ -10,6 +10,10 @@ import {
   VoiceSettingsUI,
   type VoiceSettingsModel,
 } from "./voice-settings";
+import {
+  ContinuousReadingSettingsUI,
+  type ContinuousReadingSettingsModel,
+} from "./continuous-reading-settings";
 import type {
   AccessibilityToolState,
   ColorScheme,
@@ -30,10 +34,16 @@ interface ToolbarCallbacks {
   onVoicePreview?: () => void;
   onVoiceClear?: () => void;
   onVoiceSettingsClose?: () => void;
+  onContinuousReadingStart?: () => void;
+  onContinuousReadingPause?: () => void;
+  onContinuousReadingResume?: () => void;
+  onContinuousReadingStop?: () => void;
+  onContinuousReadingSettingsClose?: () => void;
 }
 
 const FEATURE_LABELS: Readonly<Record<FeatureId, string>> = {
   reading: "朗读",
+  continuousReading: "连续朗读",
   speechRate: "语速",
   voiceSelection: "音色",
   colorScheme: "配色",
@@ -102,6 +112,9 @@ const TOGGLE_ICONS = {
 
 const ICONS: Readonly<Record<string, string>> = {
   reading: TOGGLE_ICONS.sound.off,
+  continuousReading: createSvgIcon(
+    '<path d="M5 4v16l14-8L5 4Z"/><path class="a11y-icon__muted" d="M19 5v14"/>',
+  ),
   speechRate: renderSpeechRateIcon(1),
   voiceSelection: createSvgIcon(
     '<path d="M4 12h2M8 8v8M12 5v14M16 8v8M20 11v2"/><path class="a11y-icon__muted" d="M4 5h16"/>',
@@ -170,6 +183,7 @@ export class ToolbarUI {
   private readonly verticalLine: HTMLDivElement;
   private readonly highlight: HTMLDivElement;
   private readonly voiceSettings: VoiceSettingsUI;
+  private readonly continuousReadingSettings: ContinuousReadingSettingsUI;
   private readonly controls = new Map<ToolbarAction, HTMLElement>();
   private regionCounts: Record<RegionType, number> = {
     viewport: 0,
@@ -185,6 +199,11 @@ export class ToolbarUI {
   > | null = null;
   private state: AccessibilityToolState | null = null;
   private voiceSettingsModel: VoiceSettingsModel | null = null;
+  private continuousReadingSettingsModel: ContinuousReadingSettingsModel = {
+    state: "idle",
+    supported: true,
+    position: null,
+  };
   private config: ResolvedAccessibilityToolConfig;
   private collapseTimer: number | null = null;
 
@@ -265,6 +284,18 @@ export class ToolbarUI {
         onClose: () => this.callbacks.onVoiceSettingsClose?.(),
       },
     );
+    this.continuousReadingSettings = new ContinuousReadingSettingsUI(
+      this.root,
+      `${host.id}-continuous-reading-settings`,
+      {
+        onStart: () => this.callbacks.onContinuousReadingStart?.(),
+        onPause: () => this.callbacks.onContinuousReadingPause?.(),
+        onResume: () => this.callbacks.onContinuousReadingResume?.(),
+        onStop: () => this.callbacks.onContinuousReadingStop?.(),
+        onClose: () => this.callbacks.onContinuousReadingSettingsClose?.(),
+        resolveAnchor: () => this.findVisibleControl("continuousReading"),
+      },
+    );
     shadowRoot.append(this.root);
 
     this.bindEvents();
@@ -296,6 +327,7 @@ export class ToolbarUI {
   hide(): void {
     this.cancelCollapse();
     this.voiceSettings.close({ notify: true });
+    this.continuousReadingSettings.close({ notify: true });
     this.setCurrentRegion(null);
     this.hideCrosshair();
     this.hideHighlight();
@@ -306,10 +338,12 @@ export class ToolbarUI {
   destroy(): void {
     this.cancelCollapse();
     this.voiceSettings.destroy();
+    this.continuousReadingSettings.destroy();
     this.root.remove();
   }
 
   updateState(state: AccessibilityToolState): void {
+    const modeChanged = this.state?.isReadScreen !== state.isReadScreen;
     this.state = state;
     this.host.toggleAttribute("data-a11y-tool-pinned", state.isPinned);
     this.host.toggleAttribute("data-a11y-tool-collapsed", state.isCollapsed);
@@ -323,6 +357,12 @@ export class ToolbarUI {
     if (state.isReadScreen) {
       this.voiceSettings.close({ notify: true });
     }
+    if (modeChanged) {
+      this.continuousReadingSettings.close({ notify: true });
+    }
+    this.continuousReadingSettings.update(
+      this.continuousReadingSettingsModel,
+    );
 
     for (const feature of MAIN_FEATURE_ORDER) {
       for (const control of this.findControls(feature)) {
@@ -367,15 +407,35 @@ export class ToolbarUI {
     }
   }
 
+  updateContinuousReadingSettings(
+    model: ContinuousReadingSettingsModel,
+  ): void {
+    this.continuousReadingSettingsModel = model;
+    this.continuousReadingSettings.update(model);
+  }
+
   toggleVoiceSettings(): void {
     const control = this.findVisibleControl("voiceSelection");
     if (control) {
+      this.continuousReadingSettings.close({ notify: true });
       this.voiceSettings.toggle(control);
     }
   }
 
   closeVoiceSettings(returnFocus = false): void {
     this.voiceSettings.close({ returnFocus, notify: true });
+  }
+
+  toggleContinuousReadingSettings(): void {
+    const control = this.findVisibleControl("continuousReading");
+    if (control) {
+      this.voiceSettings.close({ notify: true });
+      this.continuousReadingSettings.toggle(control);
+    }
+  }
+
+  closeContinuousReadingSettings(returnFocus = false): void {
+    this.continuousReadingSettings.close({ returnFocus, notify: true });
   }
 
   setRegionCounts(counts: Readonly<Record<RegionType, number>>): void {
@@ -470,6 +530,7 @@ export class ToolbarUI {
     }
     if (collapsed) {
       this.voiceSettings.close({ notify: true });
+      this.continuousReadingSettings.close({ notify: true });
     }
     this.host.toggleAttribute("data-a11y-tool-collapsed", collapsed);
     this.revealButton.tabIndex = collapsed ? 0 : -1;
@@ -570,7 +631,10 @@ export class ToolbarUI {
 
   private buildMainControls(): void {
     for (const feature of MAIN_FEATURE_ORDER) {
-      if (!this.config.features[feature]) {
+      if (
+        !this.config.features[feature] ||
+        (feature === "continuousReading" && !this.config.features.reading)
+      ) {
         continue;
       }
       this.mainGroup.append(this.createControl(feature, FEATURE_LABELS[feature]));
@@ -585,6 +649,14 @@ export class ToolbarUI {
     }
     if (this.config.features.reading) {
       this.screenGroup.append(this.createControl("screenSound", "朗读"));
+    }
+    if (
+      this.config.features.reading &&
+      this.config.features.continuousReading
+    ) {
+      this.screenGroup.append(
+        this.createControl("continuousReading", "连续朗读"),
+      );
     }
     if (this.config.features.help) {
       this.screenGroup.append(this.createControl("help", "帮助"));
@@ -632,6 +704,14 @@ export class ToolbarUI {
       control.setAttribute(
         "aria-controls",
         `${this.host.id}-voice-settings`,
+      );
+    }
+    if (action === "continuousReading") {
+      control.setAttribute("aria-haspopup", "dialog");
+      control.setAttribute("aria-expanded", "false");
+      control.setAttribute(
+        "aria-controls",
+        `${this.host.id}-continuous-reading-settings`,
       );
     }
     const labelMarkup = regionType
@@ -833,6 +913,20 @@ export class ToolbarUI {
         control.setAttribute("aria-label", `朗读，当前${readingState}`);
         break;
       }
+      case "continuousReading": {
+        const labels = {
+          idle: "未开始",
+          playing: "朗读中",
+          paused: "已暂停",
+        } as const;
+        const current = labels[state.continuousReadingState];
+        meta.textContent = current;
+        control.setAttribute(
+          "aria-label",
+          `连续朗读，当前${current}，打开连续朗读控制`,
+        );
+        break;
+      }
       case "speechRate":
         meta.textContent = `${formatRate(state.speechRate)}×`;
         control.setAttribute("aria-label", `语速，当前 ${formatRate(state.speechRate)} 倍`);
@@ -1007,6 +1101,11 @@ function getIconPresentation(
           : TOGGLE_ICONS.sound.off,
         state: `sound-${state.readingEnabled ? "on" : "off"}`,
       };
+    case "continuousReading":
+      return {
+        markup: renderContinuousReadingIcon(state.continuousReadingState),
+        state: `continuous-${state.continuousReadingState}`,
+      };
     case "largeCursor":
       return {
         markup: state.largeCursor
@@ -1065,6 +1164,24 @@ function getIconPresentation(
 function createSvgIcon(content: string, attributes = ""): string {
   const suffix = attributes ? ` ${attributes}` : "";
   return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"${suffix}>${content}</svg>`;
+}
+
+function renderContinuousReadingIcon(
+  state: AccessibilityToolState["continuousReadingState"],
+): string {
+  if (state === "playing") {
+    return createSvgIcon(
+      '<path d="M7 5h4v14H7zM14 5h4v14h-4z"/><path class="a11y-icon__muted" d="M4 3h16v18H4z"/>',
+    );
+  }
+  if (state === "paused") {
+    return createSvgIcon(
+      '<path d="M6 4v16l13-8L6 4Z"/><circle class="a11y-icon__muted" cx="19" cy="5" r="2"/>',
+    );
+  }
+  return createSvgIcon(
+    '<path d="M6 4v16l13-8L6 4Z"/><path class="a11y-icon__muted" d="M19 5v14"/>',
+  );
 }
 
 function renderSpeechRateIcon(rate: number): string {

@@ -2,6 +2,7 @@ import type { ResolvedAccessibilityToolConfig } from "../core/config";
 import { TOOL_HOST_ATTRIBUTE } from "../core/constants";
 import { DomLedger } from "../core/dom-ledger";
 import {
+  getDeepActiveElement,
   isHTMLElement,
   isVisible,
   querySelectorAllSafe,
@@ -547,37 +548,6 @@ function getRootDocument(root: Document | ShadowRoot): Document {
   return root.nodeType === 9
     ? (root as Document)
     : (root.ownerDocument ?? document);
-}
-
-function getDeepActiveElement(
-  root: Document | ShadowRoot,
-): HTMLElement | null {
-  let activeElement: Element | null = root.activeElement;
-  while (activeElement) {
-    if (!isHTMLElement(activeElement)) {
-      return null;
-    }
-    const shadowActiveElement = activeElement.shadowRoot?.activeElement;
-    if (isHTMLElement(shadowActiveElement)) {
-      activeElement = shadowActiveElement;
-      continue;
-    }
-    if (activeElement.tagName === "IFRAME") {
-      try {
-        const frameActiveElement = (
-          activeElement as HTMLIFrameElement
-        ).contentDocument?.activeElement;
-        if (isHTMLElement(frameActiveElement)) {
-          activeElement = frameActiveElement;
-          continue;
-        }
-      } catch {
-        // Cross-origin frames stay atomic and are not inspected.
-      }
-    }
-    return activeElement as HTMLElement;
-  }
-  return null;
 }
 
 function isElementCurrentlyFocused(element: HTMLElement): boolean {

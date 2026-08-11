@@ -79,35 +79,47 @@ export class SpeechController {
     }
     this.cancel();
     const requestId = ++this.requestId;
+    let started = false;
+    let settled = false;
     this.activeOnCancel = callbacks.onCancel ?? null;
-    this.adapter.speak(text, {
-      lang,
-      rate,
-      onStart: () => {
-        if (requestId === this.requestId) {
-          this.emitter.emit("speechstart", { textLength: text.length });
-        }
-      },
-      onEnd: () => {
-        if (requestId !== this.requestId) {
-          return;
-        }
-        this.activeOnCancel = null;
-        this.emitter.emit("speechend", undefined);
-        callbacks.onEnd?.();
-      },
-      onError: (error) => {
-        if (requestId !== this.requestId) {
-          return;
-        }
-        this.activeOnCancel = null;
-        this.emitter.emit("error", {
-          error,
-          message: "语音朗读失败。",
-        });
-        callbacks.onError?.();
-      },
-    });
+    const settleError = (error: unknown): void => {
+      if (requestId !== this.requestId || settled) {
+        return;
+      }
+      settled = true;
+      this.requestId = requestId + 1;
+      this.activeOnCancel = null;
+      this.emitter.emit("error", {
+        error,
+        message: "语音朗读失败。",
+      });
+      callbacks.onError?.();
+    };
+    try {
+      this.adapter.speak(text, {
+        lang,
+        rate,
+        onStart: () => {
+          if (requestId === this.requestId && !started && !settled) {
+            started = true;
+            this.emitter.emit("speechstart", { textLength: text.length });
+          }
+        },
+        onEnd: () => {
+          if (requestId !== this.requestId || settled) {
+            return;
+          }
+          settled = true;
+          this.requestId = requestId + 1;
+          this.activeOnCancel = null;
+          this.emitter.emit("speechend", undefined);
+          callbacks.onEnd?.();
+        },
+        onError: settleError,
+      });
+    } catch (error) {
+      settleError(error);
+    }
     return () => {
       if (requestId === this.requestId) {
         this.cancel();
@@ -119,7 +131,11 @@ export class SpeechController {
     this.requestId += 1;
     const onCancel = this.activeOnCancel;
     this.activeOnCancel = null;
-    this.adapter.cancel();
+    try {
+      this.adapter.cancel();
+    } catch {
+      // Cancellation is best-effort and must never block state cleanup.
+    }
     onCancel?.();
   }
 }

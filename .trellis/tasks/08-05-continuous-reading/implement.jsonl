@@ -1,1 +1,14 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/accessibility-tool-contract.md", "reason": "公共 API、工具栏、朗读、tabs/dialog、生命周期与测试契约"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "约束 reading、speech、runtime、UI 与公共事件之间的数据流"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "要求复用现有朗读、语音、可见性、语言和工具栏模式"}
+{"file": ".trellis/tasks/08-05-continuous-reading/research/runtime-flow.md", "reason": "现有 ReadingController、SpeechController、scanner 与生命周期边界"}
+{"file": ".trellis/tasks/08-05-continuous-reading/research/sequence-and-start-options.md", "reason": "起点回退、composed-tree 顺序与稳定序列结论"}
+{"file": ".trellis/tasks/08-05-continuous-reading/research/control-entry-options.md", "reason": "连续朗读入口、控制面板与 1280px 工具栏约束"}
+{"file": ".trellis/tasks/08-05-continuous-reading/research/interaction-takeover-options.md", "reason": "焦点、点击、tab、区域和显式语音抢占规则"}
+{"file": ".trellis/tasks/08-05-continuous-reading/research/dialog-context-options.md", "reason": "模态 dialog 范围与停止行为"}
+{"file": ".trellis/tasks/08-05-continuous-reading/research/session-finish-options.md", "reason": "自然完成、错误、焦点、高亮与反馈规则"}
+{"file": ".trellis/tasks/08-05-continuous-reading/research/reading-toggle-integration-options.md", "reason": "readingEnabled 自动开启、持久化与关闭联动"}
+{"file": ".trellis/tasks/08-05-continuous-reading/research/speech-setting-change-options.md", "reason": "语速、语言、音色变化的逐段生效边界"}
+{"file": ".trellis/tasks/08-05-continuous-reading/research/dynamic-sequence-options.md", "reason": "冻结成员、逐段复验和动态 DOM 行为"}
+{"file": ".trellis/tasks/08-05-continuous-reading/research/form-control-reading-options.md", "reason": "编辑值隐私与表单语义范围"}
+{"file": ".trellis/tasks/08-05-continuous-reading/research/region-transition-options.md", "reason": "跨区域无缝继续且不合成区域提示"}

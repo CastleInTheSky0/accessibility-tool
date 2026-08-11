@@ -55,6 +55,7 @@ describe("AccessibilityTool singleton lifecycle", () => {
     ).map((element) => element.textContent);
     expect(labels).toEqual([
       "朗读",
+      "连续朗读",
       "语速",
       "音色",
       "配色",

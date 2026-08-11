@@ -257,6 +257,11 @@ export class TabsController {
     return false;
   }
 
+  isContinuousReadingTab(element: HTMLElement): boolean {
+    const group = this.findGroup(element);
+    return group?.tabs.includes(element) ?? false;
+  }
+
   requestPanelVisibility(panel: HTMLElement): Promise<boolean> {
     if (!this.running || !panel.isConnected) {
       return Promise.resolve(false);

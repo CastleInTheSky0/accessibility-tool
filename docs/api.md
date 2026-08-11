@@ -158,7 +158,7 @@ registration.dispose();
 
 ### `toolbar`
 
-桌面主工具栏固定为单排，功能顺序由内部常量保持稳定；v0.2 在“语速”和“配色”之间增加独立“音色”入口。工具栏外层继续占满视口，品牌与控件共享的内部版心为 `width: 100%`、`max-width: 1280px`；1024～1279px 使用紧凑单排布局。
+桌面主工具栏固定为单排，功能顺序由内部常量保持稳定；完整主模式共有 15 个控件，其中顺序固定为“朗读 → 连续朗读 → 语速 → 音色 → 配色”。工具栏外层继续占满视口，品牌与控件共享的内部版心为 `width: 100%`、`max-width: 1280px`；1024～1279px 使用紧凑单排布局。
 
 | 字段 | 默认值 |
 | --- | --- |
@@ -188,6 +188,18 @@ interface SpeechAdapter {
 | `hoverDelayMs` | `500` |
 | `defaultRate` | `1` |
 | `ignoreSelectors` | `[]` |
+
+### 连续朗读
+
+- `features.continuousReading` 依赖 `features.reading`。主模式和读屏专用模式的“连续朗读”入口连接同一会话，并打开 Shadow DOM 内 anchored、非模态“连续朗读控制”面板。
+- 面板提供开始、暂停／继续和停止。Esc、关闭按钮或面板外操作只关闭面板，不停止仍在播放的会话；显式关闭后焦点返回当前连接的入口。
+- 开始前先检查 `SpeechAdapter.isSupported()`。不支持时保持 `readingEnabled` 和连续状态不变；支持但当前范围为空时会保留自动开启并持久化的 `readingEnabled`，连续状态仍为 `idle`，两种情况都只通过 live region 说明原因。
+- 默认起点依次为工具栏接管前最后一个有效页面目标、当前盲道区域首个有效段落、页面首个有效段落。自动推进不移动键盘焦点，只更新朗读高亮并在需要时滚动。
+- 每次启动冻结一个有限 composed-tree 队列，按页面顺序进入 open Shadow Root、slot 和同源 iframe；未标记正文也会参与。新插入的普通内容留到下次启动，已有成员在每段前重新解析当前文本、语言、语速和音色。
+- 当前有效 tab 控件作为原子项朗读；只有启动时可见的当前 panel 内容逐段进入队列，隐藏 panel 不会被读取或自动激活。模态 dialog 打开会停止背景会话；在 dialog 内重新开始时只读取最内层活动 dialog。
+- 自动遍历不朗读 editable 输入值。密码、验证码（含 `autocomplete="one-time-code"`）、支付字段、显式敏感内容、配置忽略项，以及被这些节点提供的 label、ARIA 名称、说明或当前选项文本都会被排除；单次主动聚焦／点击的普通 editable 朗读行为保持不变。
+- 暂停通过取消当前请求实现，继续从被中断段落开头重播。用户页面交互、其他显式语音、音色试听、路由、dialog、关闭朗读和生命周期清理都会按对应原因结束会话；语速、默认语言或音色偏好调整从下一段生效，不抢占当前段。
+- 所有段落继续经过唯一的 `SpeechController → SpeechAdapter`。自定义 adapter 的同步 `speak()` 异常会转换为一次有效语音错误；`cancel()` 异常不会阻断暂停、停止或清理。连续朗读不保存正文，也不发起网络请求。
 
 ### 浏览器本地音色选择
 
@@ -262,6 +274,7 @@ interface AccessibilityToolState {
   isCollapsed: boolean;
   isReadScreen: boolean;
   readingEnabled: boolean;
+  continuousReadingState: "idle" | "playing" | "paused";
   speechRate: number;
   colorScheme: ColorScheme;
   zoom: number;
@@ -273,7 +286,54 @@ interface AccessibilityToolState {
 
 ## 本地事件
 
-支持 `open`、`close`、`statechange`、`regionchange`、`speechstart`、`speechend` 和 `error`。
+支持 `open`、`close`、`statechange`、`regionchange`、`speechstart`、`speechend`、`error`，以及五个连续朗读会话事件。
+
+```ts
+type ContinuousReadingState = "idle" | "playing" | "paused";
+type ContinuousReadingScope = "page" | "dialog";
+type ContinuousReadingStopReason =
+  | "completed"
+  | "stopped"
+  | "interaction"
+  | "dialog"
+  | "route"
+  | "disabled"
+  | "lifecycle"
+  | "error";
+
+interface ContinuousReadingPosition {
+  index: number; // 从 1 开始，位于启动时冻结的候选队列中
+  count: number; // 启动时冻结的候选总数
+  textLength: number;
+}
+
+interface ContinuousReadingEvents {
+  continuousreadingstart: {
+    state: "playing";
+    scope: ContinuousReadingScope;
+    count: number;
+  };
+  continuousreadingsegmentchange: ContinuousReadingPosition & {
+    state: "playing";
+  };
+  continuousreadingpause: ContinuousReadingPosition & {
+    state: "paused";
+  };
+  continuousreadingresume: ContinuousReadingPosition & {
+    state: "playing";
+  };
+  continuousreadingstop: {
+    state: "idle";
+    reason: ContinuousReadingStopReason;
+    lastIndex: number | null;
+    count: number;
+  };
+}
+```
+
+`index`／`count` 描述启动时冻结的队列；运行中失效并被跳过的成员不会触发 `continuousreadingsegmentchange`，因此 `index` 可以跳号。公共 payload 不包含正文、Element、语言、区域标签或内部 generation；当前有效段落只由内部 reading provider 暴露给后续大字幕功能。
+
+首次有效启动的事件顺序为：必要的 `readingEnabled` `statechange` → `continuousReadingState="playing"` `statechange` → `continuousreadingstart` → 首段 `continuousreadingsegmentchange` → `speechstart`。有效错误顺序为唯一 `error` → idle `statechange` → reason=`error` 的 `continuousreadingstop`；取消或过期回调不会补发 `speechend`／`error`。
 
 ```js
 const onRegion = ({ type, index, count, label }) => {

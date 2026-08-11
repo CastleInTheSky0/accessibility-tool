@@ -9,7 +9,7 @@ import type {
 } from "../../src/types";
 
 describe("ToolbarUI", () => {
-  it("renders the confirmed 14-control main order and an independent voice dialog trigger", () => {
+  it("renders the confirmed 15-control main order and independent settings triggers", () => {
     const { host, shadow, ui } = createToolbar();
     ui.updateState(defaultState);
 
@@ -20,6 +20,7 @@ describe("ToolbarUI", () => {
     ).map((control) => control.dataset.action);
     expect(actions).toEqual([
       "reading",
+      "continuousReading",
       "speechRate",
       "voiceSelection",
       "colorScheme",
@@ -42,6 +43,19 @@ describe("ToolbarUI", () => {
     expect(shadow.querySelector(`#${host.id}-voice-settings`)?.getAttribute("role"))
       .toBe("dialog");
     expect(voice.hasAttribute("aria-pressed")).toBe(false);
+
+    const continuous = getControl(shadow, "continuousReading");
+    expect(continuous.getAttribute("aria-haspopup")).toBe("dialog");
+    expect(continuous.getAttribute("aria-expanded")).toBe("false");
+    expect(continuous.getAttribute("aria-controls")).toBe(
+      `${host.id}-continuous-reading-settings`,
+    );
+    expect(
+      shadow
+        .querySelector(`#${host.id}-continuous-reading-settings`)
+        ?.getAttribute("role"),
+    ).toBe("dialog");
+    expect(continuous.hasAttribute("aria-pressed")).toBe(false);
 
     ui.destroy();
     host.remove();
@@ -143,6 +157,90 @@ describe("ToolbarUI", () => {
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(shadow.activeElement).toBe(trigger);
     expect(onVoiceSettingsClose).toHaveBeenCalledTimes(1);
+
+    ui.destroy();
+    host.remove();
+  });
+
+  it("operates one non-modal continuous-reading panel without stopping on close", () => {
+    const onStart = vi.fn();
+    const onPause = vi.fn();
+    const onResume = vi.fn();
+    const onStop = vi.fn();
+    const onClose = vi.fn();
+    const { host, shadow, ui } = createToolbar(
+      mergeConfig(DEFAULT_CONFIG),
+      vi.fn(),
+      {
+        onContinuousReadingStart: onStart,
+        onContinuousReadingPause: onPause,
+        onContinuousReadingResume: onResume,
+        onContinuousReadingStop: onStop,
+        onContinuousReadingSettingsClose: onClose,
+      },
+    );
+    ui.updateState(defaultState);
+    ui.updateContinuousReadingSettings({
+      state: "idle",
+      supported: true,
+      position: null,
+    });
+
+    const trigger = getControl(shadow, "continuousReading");
+    ui.toggleContinuousReadingSettings();
+    const panel = shadow.querySelector<HTMLElement>(
+      ".a11y-continuous-reading",
+    );
+    const start = panel?.querySelector<HTMLButtonElement>(
+      '[data-intent="start"]',
+    );
+    const pause = panel?.querySelector<HTMLButtonElement>(
+      '[data-intent="pause"]',
+    );
+    const stop = panel?.querySelector<HTMLButtonElement>(
+      '[data-intent="stop"]',
+    );
+    expect(panel?.hidden).toBe(false);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(shadow.activeElement).toBe(start);
+    start?.click();
+    expect(onStart).toHaveBeenCalledTimes(1);
+
+    ui.updateState({ ...defaultState, continuousReadingState: "playing" });
+    ui.updateContinuousReadingSettings({
+      state: "playing",
+      supported: true,
+      position: { index: 2, count: 6, textLength: 18 },
+    });
+    expect(start?.getAttribute("aria-disabled")).toBe("true");
+    expect(panel?.querySelector(".a11y-continuous-reading__status")?.textContent)
+      .toBe("正在朗读第 2 / 6 段");
+    pause?.click();
+    expect(onPause).toHaveBeenCalledTimes(1);
+
+    ui.updateState({ ...defaultState, continuousReadingState: "paused" });
+    ui.updateContinuousReadingSettings({
+      state: "paused",
+      supported: true,
+      position: { index: 2, count: 6, textLength: 18 },
+    });
+    const resume = panel?.querySelector<HTMLButtonElement>(
+      '[data-intent="resume"]',
+    );
+    expect(resume?.textContent).toBe("继续");
+    resume?.click();
+    expect(onResume).toHaveBeenCalledTimes(1);
+    stop?.click();
+    expect(onStop).toHaveBeenCalledTimes(1);
+
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+    expect(panel?.hidden).toBe(true);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(shadow.activeElement).toBe(trigger);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onStop).toHaveBeenCalledTimes(1);
 
     ui.destroy();
     host.remove();
@@ -332,6 +430,7 @@ describe("ToolbarUI", () => {
       "region:list",
       "region:content",
       "screenSound",
+      "continuousReading",
       "help",
       "readScreen",
       "exit",
@@ -943,6 +1042,7 @@ const defaultState: AccessibilityToolState = {
   isCollapsed: false,
   isReadScreen: false,
   readingEnabled: false,
+  continuousReadingState: "idle",
   speechRate: 1,
   colorScheme: "original",
   zoom: 1,

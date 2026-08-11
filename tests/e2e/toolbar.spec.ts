@@ -32,6 +32,7 @@ test("opens lazily and supports the toolbar keyboard model", async ({ page }) =>
     .allTextContents();
   expect(labels).toEqual([
     "朗读",
+    "连续朗读",
     "语速",
     "音色",
     "配色",
@@ -48,10 +49,15 @@ test("opens lazily and supports the toolbar keyboard model", async ({ page }) =>
   ]);
 
   const reading = host.locator('[data-action="reading"]');
+  const continuousReading = host.locator(
+    '[data-mode="main"] [data-action="continuousReading"]',
+  );
   const rate = host.locator('[data-action="speechRate"]');
   await expect(reading).toBeFocused();
   await expect(reading).toHaveAttribute("data-icon-state", "sound-off");
   await expect(rate).toHaveAttribute("data-icon-state", "rate-1");
+  await page.keyboard.press("ArrowRight");
+  await expect(continuousReading).toBeFocused();
   await page.keyboard.press("ArrowRight");
   await expect(rate).toBeFocused();
   await page.keyboard.press("Enter");
@@ -253,11 +259,11 @@ test("keeps all main controls on one centered row from 1024 to 2048 pixels", asy
   const toolbar = host.locator(".a11y-toolbar");
 
   for (const viewport of [
-    { width: 2048, minimumControlWidth: 80, maximumControlWidth: 85 },
-    { width: 1440, minimumControlWidth: 80, maximumControlWidth: 85 },
-    { width: 1280, minimumControlWidth: 80, maximumControlWidth: 85 },
-    { width: 1200, minimumControlWidth: 74, maximumControlWidth: 77 },
-    { width: 1024, minimumControlWidth: 64, maximumControlWidth: 68 },
+    { width: 2048, minimumControlWidth: 78, maximumControlWidth: 80 },
+    { width: 1440, minimumControlWidth: 78, maximumControlWidth: 80 },
+    { width: 1280, minimumControlWidth: 78, maximumControlWidth: 80 },
+    { width: 1200, minimumControlWidth: 72, maximumControlWidth: 74 },
+    { width: 1024, minimumControlWidth: 60, maximumControlWidth: 63 },
   ]) {
     await page.setViewportSize({ width: viewport.width, height: 800 });
     const metrics = await toolbar.evaluate((element) => {
@@ -321,7 +327,7 @@ test("keeps all main controls on one centered row from 1024 to 2048 pixels", asy
       };
     });
 
-    expect(metrics.controlCount).toBe(14);
+    expect(metrics.controlCount).toBe(15);
     expect(metrics.background).toBe("rgb(24, 27, 30)");
     expect(metrics.brandWithinFrame).toBe(true);
     expect(metrics.exitWithinFrame).toBe(true);
@@ -343,8 +349,13 @@ test("keeps all main controls on one centered row from 1024 to 2048 pixels", asy
   }
 
   const reading = host.locator('[data-mode="main"] [data-action="reading"]');
+  const continuousReading = host.locator(
+    '[data-mode="main"] [data-action="continuousReading"]',
+  );
   const rate = host.locator('[data-mode="main"] [data-action="speechRate"]');
   await reading.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(continuousReading).toBeFocused();
   await page.keyboard.press("ArrowRight");
   await expect(rate).toBeFocused();
   const focusStyle = await rate.evaluate((element) => {
@@ -439,6 +450,7 @@ test("keeps push offsets and toolbar height stable while switching modes", async
     "region:list",
     "region:content",
     "screenSound",
+    "continuousReading",
     "help",
     "readScreen",
     "exit",
@@ -1047,7 +1059,7 @@ test("keeps keyboard focusout on the configured pinned collapse delay", async ({
   await page.keyboard.press("Enter");
   const host = page.locator("[data-a11y-tool-host]");
   const pin = host.locator('[data-action="pin"]');
-  for (let index = 0; index < 9; index += 1) {
+  for (let index = 0; index < 10; index += 1) {
     await page.keyboard.press("ArrowRight");
   }
   await expect(pin).toBeFocused();

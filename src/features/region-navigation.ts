@@ -167,6 +167,12 @@ export class RegionNavigationController {
     }
   }
 
+  getCurrentRegionElement(): HTMLElement | null {
+    return this.current?.element.isConnected && isVisible(this.current.element)
+      ? this.current.element
+      : null;
+  }
+
   async navigate(type: RegionType): Promise<boolean> {
     const requestId = ++this.navigationRequestId;
     const regions = this.getRegions(type);

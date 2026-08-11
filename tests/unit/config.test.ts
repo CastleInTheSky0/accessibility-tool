@@ -36,6 +36,7 @@ describe("configuration", () => {
   it("keeps the confirmed feature order", () => {
     expect(MAIN_FEATURE_ORDER).toEqual([
       "reading",
+      "continuousReading",
       "speechRate",
       "voiceSelection",
       "colorScheme",

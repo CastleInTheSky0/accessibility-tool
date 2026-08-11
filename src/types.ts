@@ -40,6 +40,7 @@ export interface TabRegistrationItem {
 
 export type FeatureId =
   | "reading"
+  | "continuousReading"
   | "speechRate"
   | "voiceSelection"
   | "colorScheme"
@@ -163,12 +164,31 @@ export interface AccessibilityToolState {
   isCollapsed: boolean;
   isReadScreen: boolean;
   readingEnabled: boolean;
+  continuousReadingState: ContinuousReadingState;
   speechRate: number;
   colorScheme: ColorScheme;
   zoom: number;
   largeCursor: boolean;
   crosshair: boolean;
   isFullscreen: boolean;
+}
+
+export type ContinuousReadingState = "idle" | "playing" | "paused";
+export type ContinuousReadingScope = "page" | "dialog";
+export type ContinuousReadingStopReason =
+  | "completed"
+  | "stopped"
+  | "interaction"
+  | "dialog"
+  | "route"
+  | "disabled"
+  | "lifecycle"
+  | "error";
+
+export interface ContinuousReadingPosition {
+  index: number;
+  count: number;
+  textLength: number;
 }
 
 export interface RegionChangeEvent {
@@ -186,6 +206,26 @@ export interface AccessibilityToolEventMap {
   regionchange: RegionChangeEvent;
   speechstart: { textLength: number };
   speechend: undefined;
+  continuousreadingstart: {
+    state: "playing";
+    scope: ContinuousReadingScope;
+    count: number;
+  };
+  continuousreadingsegmentchange: ContinuousReadingPosition & {
+    state: "playing";
+  };
+  continuousreadingpause: ContinuousReadingPosition & {
+    state: "paused";
+  };
+  continuousreadingresume: ContinuousReadingPosition & {
+    state: "playing";
+  };
+  continuousreadingstop: {
+    state: "idle";
+    reason: ContinuousReadingStopReason;
+    lastIndex: number | null;
+    count: number;
+  };
   error: { error: unknown; message: string };
 }
 

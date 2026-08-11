@@ -210,6 +210,21 @@ describe("DOM accessibility helpers", () => {
     expect(isVisible(get("english"))).toBe(true);
   });
 
+  it("filters inert and aria-hidden boundaries across an open Shadow Root", () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const shadow = host.attachShadow({ mode: "open" });
+    shadow.innerHTML = `<p id="shadow-copy">Shadow copy</p>`;
+    const copy = shadow.getElementById("shadow-copy");
+    expect(copy).toBeInstanceOf(HTMLElement);
+
+    host.setAttribute("inert", "");
+    expect(isVisible(copy as HTMLElement)).toBe(false);
+    host.removeAttribute("inert");
+    host.setAttribute("aria-hidden", "true");
+    expect(isVisible(copy as HTMLElement)).toBe(false);
+  });
+
   it("resolves aria-labelledby inside an open Shadow Root", () => {
     const host = document.createElement("div");
     document.body.append(host);
