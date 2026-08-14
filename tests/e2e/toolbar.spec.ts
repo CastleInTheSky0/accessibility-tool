@@ -41,6 +41,7 @@ test("opens lazily and supports the toolbar keyboard model", async ({ page }) =>
     "大鼠标",
     "十字线",
     "大界面",
+    "大字幕",
     "固定",
     "重置",
     "帮助",
@@ -259,11 +260,11 @@ test("keeps all main controls on one centered row from 1024 to 2048 pixels", asy
   const toolbar = host.locator(".a11y-toolbar");
 
   for (const viewport of [
-    { width: 2048, minimumControlWidth: 78, maximumControlWidth: 80 },
-    { width: 1440, minimumControlWidth: 78, maximumControlWidth: 80 },
-    { width: 1280, minimumControlWidth: 78, maximumControlWidth: 80 },
-    { width: 1200, minimumControlWidth: 72, maximumControlWidth: 74 },
-    { width: 1024, minimumControlWidth: 60, maximumControlWidth: 63 },
+    { width: 2048, minimumControlWidth: 73, maximumControlWidth: 75 },
+    { width: 1440, minimumControlWidth: 73, maximumControlWidth: 75 },
+    { width: 1280, minimumControlWidth: 73, maximumControlWidth: 75 },
+    { width: 1200, minimumControlWidth: 68, maximumControlWidth: 70 },
+    { width: 1024, minimumControlWidth: 57, maximumControlWidth: 59 },
   ]) {
     await page.setViewportSize({ width: viewport.width, height: 800 });
     const metrics = await toolbar.evaluate((element) => {
@@ -327,7 +328,7 @@ test("keeps all main controls on one centered row from 1024 to 2048 pixels", asy
       };
     });
 
-    expect(metrics.controlCount).toBe(15);
+    expect(metrics.controlCount).toBe(16);
     expect(metrics.background).toBe("rgb(24, 27, 30)");
     expect(metrics.brandWithinFrame).toBe(true);
     expect(metrics.exitWithinFrame).toBe(true);
@@ -451,6 +452,7 @@ test("keeps push offsets and toolbar height stable while switching modes", async
     "region:content",
     "screenSound",
     "continuousReading",
+    "largeCaption",
     "help",
     "readScreen",
     "exit",
@@ -1059,7 +1061,7 @@ test("keeps keyboard focusout on the configured pinned collapse delay", async ({
   await page.keyboard.press("Enter");
   const host = page.locator("[data-a11y-tool-host]");
   const pin = host.locator('[data-action="pin"]');
-  for (let index = 0; index < 10; index += 1) {
+  for (let index = 0; index < 11; index += 1) {
     await page.keyboard.press("ArrowRight");
   }
   await expect(pin).toBeFocused();

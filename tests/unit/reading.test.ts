@@ -2,12 +2,60 @@ import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_CONFIG, mergeConfig } from "../../src/core/config";
 import type { PageEffectsController } from "../../src/features/page-effects";
 import { ReadingController } from "../../src/features/reading";
+import type { OutputRequestOptions } from "../../src/features/output";
 import { RegionNavigationController } from "../../src/features/region-navigation";
 import type { ScannedRegion } from "../../src/features/regions";
 import type { SpeechController } from "../../src/features/speech";
 import { TabsController } from "../../src/features/tabs";
 
 describe("ReadingController region focus coordination", () => {
+  it("ignores a stale cancel callback when the same target is replaced", () => {
+    document.body.innerHTML = `<button id="replacement-target">重复目标</button>`;
+    let activeCancel: (() => void) | undefined;
+    let latestOptions: OutputRequestOptions | undefined;
+    const output = {
+      speak: vi.fn(
+        (
+          _text: string,
+          _lang: string,
+          _rate: number,
+          options: OutputRequestOptions,
+        ) => {
+          activeCancel?.();
+          activeCancel = options.onCancel;
+          latestOptions = options;
+          return vi.fn();
+        },
+      ),
+      cancel: vi.fn(() => activeCancel?.()),
+    };
+    const effects = {
+      setHighlight: vi.fn(),
+      clearHighlight: vi.fn(),
+    };
+    const reading = new ReadingController(
+      DEFAULT_CONFIG,
+      output,
+      effects as unknown as PageEffectsController,
+      readingState(),
+      {
+        isRegionContainer: () => false,
+        isTabSpeechTarget: () => false,
+      },
+    );
+    const target = get("replacement-target");
+
+    reading.speakElement(target, true);
+    reading.speakElement(target, true);
+
+    expect(effects.setHighlight).toHaveBeenCalledTimes(2);
+    expect(effects.clearHighlight).not.toHaveBeenCalled();
+
+    latestOptions?.onEnd?.();
+    expect(effects.clearHighlight).toHaveBeenCalledOnce();
+    expect(effects.clearHighlight).toHaveBeenCalledWith(target);
+  });
+
   it("speaks input fields with the input semantic prefix", () => {
     document.body.innerHTML = `
       <input id="search-field" placeholder="请输入关键词">

@@ -1,1 +1,8 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file":".trellis/spec/frontend/index.md","reason":"前端质量检查入口"}
+{"file":".trellis/spec/frontend/accessibility-tool-contract.md","reason":"核对公共 API、DOM、语音事件、生命周期与兼容性契约"}
+{"file":".trellis/spec/frontend/state-management.md","reason":"核对偏好迁移、默认值、重置和运行时状态一致性"}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"核对公开类型和依赖边界类型安全"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"执行 lint、类型、测试、性能和无障碍质量检查"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"核对 API、存储、语音、UI 与测试的端到端一致性"}
+{"file":".trellis/tasks/08-05-large-caption/research/caption-entry-options.md","reason":"验证入口顺序、工具栏密度和读屏模式入口"}
+{"file":".trellis/tasks/08-05-large-caption/research/caption-placement-options.md","reason":"验证全宽底部布局、缩放与滚动边界"}

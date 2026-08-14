@@ -18,6 +18,8 @@ export type ColorScheme =
 
 export type ToolbarLayoutMode = "push" | "overlay";
 export type TabActivationMode = "automatic" | "manual";
+export type CaptionFontSize = 28 | 36 | 48;
+export type CaptionScript = "simplified" | "traditional";
 
 export interface RegistrationHandle {
   dispose(): void;
@@ -49,6 +51,7 @@ export type FeatureId =
   | "largeCursor"
   | "crosshair"
   | "fullscreen"
+  | "largeCaption"
   | "pin"
   | "reset"
   | "help"
@@ -165,6 +168,10 @@ export interface AccessibilityToolState {
   isReadScreen: boolean;
   readingEnabled: boolean;
   continuousReadingState: ContinuousReadingState;
+  captionEnabled: boolean;
+  captionFontSize: CaptionFontSize;
+  captionScript: CaptionScript;
+  captionPinyinEnabled: boolean;
   speechRate: number;
   colorScheme: ColorScheme;
   zoom: number;
@@ -261,6 +268,10 @@ export interface PersistedPreferences {
   crosshair: boolean;
   isPinned: boolean;
   isReadScreen: boolean;
+  captionEnabled?: boolean;
+  captionFontSize?: CaptionFontSize;
+  captionScript?: CaptionScript;
+  captionPinyinEnabled?: boolean;
   preferredLanguage?: string;
   voice?: PersistedVoicePreference;
 }

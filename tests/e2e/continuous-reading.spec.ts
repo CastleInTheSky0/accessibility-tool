@@ -93,6 +93,7 @@ test("runs one keyboard-operable session across both toolbar modes without movin
   await page.keyboard.press("Escape");
   await expect(panel).toBeHidden();
   await expect(mainEntry).toBeFocused();
+  await page.waitForTimeout(600);
   expect(
     await page.evaluate(
       () => window.AccessibilityTool.getState().continuousReadingState,

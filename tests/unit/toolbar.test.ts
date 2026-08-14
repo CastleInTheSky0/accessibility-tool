@@ -9,7 +9,7 @@ import type {
 } from "../../src/types";
 
 describe("ToolbarUI", () => {
-  it("renders the confirmed 15-control main order and independent settings triggers", () => {
+  it("renders the confirmed 16-control main order and independent settings triggers", () => {
     const { host, shadow, ui } = createToolbar();
     ui.updateState(defaultState);
 
@@ -29,6 +29,7 @@ describe("ToolbarUI", () => {
       "largeCursor",
       "crosshair",
       "fullscreen",
+      "largeCaption",
       "pin",
       "reset",
       "help",
@@ -59,6 +60,222 @@ describe("ToolbarUI", () => {
 
     ui.destroy();
     host.remove();
+  });
+
+  it("synchronizes large-caption state across the main and read-screen entries", () => {
+    const { host, shadow, ui } = createToolbar();
+    const [mainCaption, screenCaption] = getControls(shadow, "largeCaption");
+
+    expect(mainCaption).toBeDefined();
+    expect(screenCaption).toBeDefined();
+
+    ui.updateState(defaultState);
+    expect(mainCaption?.getAttribute("aria-pressed")).toBe("false");
+    expect(screenCaption?.getAttribute("aria-pressed")).toBe("false");
+
+    ui.updateState({
+      ...defaultState,
+      isReadScreen: true,
+      captionEnabled: true,
+    });
+    expect(mainCaption?.getAttribute("aria-pressed")).toBe("true");
+    expect(screenCaption?.getAttribute("aria-pressed")).toBe("true");
+    expect(mainCaption?.closest<HTMLElement>('[data-mode="main"]')?.hidden)
+      .toBe(true);
+    expect(screenCaption?.closest<HTMLElement>('[data-mode="screen"]')?.hidden)
+      .toBe(false);
+
+    ui.destroy();
+    host.remove();
+  });
+
+  it("keeps caption text non-live and synchronizes its preference controls", () => {
+    const onScriptChange = vi.fn();
+    const onPinyinChange = vi.fn();
+    const onFontSizeChange = vi.fn();
+    const { host, shadow, ui } = createToolbar(
+      mergeConfig(DEFAULT_CONFIG),
+      vi.fn(),
+      {
+        onCaptionScriptChange: onScriptChange,
+        onCaptionPinyinChange: onPinyinChange,
+        onCaptionFontSizeChange: onFontSizeChange,
+      },
+    );
+    ui.updateState(defaultState);
+    ui.showCaption({ text: "无障碍 Accessibility", status: "显示中" }, true);
+
+    const caption = shadow.querySelector<HTMLElement>(".a11y-large-caption");
+    const body = caption?.querySelector<HTMLElement>(
+      ".a11y-large-caption__body",
+    );
+    expect(caption?.hidden).toBe(false);
+    expect(body?.getAttribute("role")).toBe("region");
+    expect(body?.getAttribute("aria-label")).toBe("当前大字幕内容");
+    expect(caption?.hasAttribute("aria-label")).toBe(false);
+    expect(body?.hasAttribute("aria-live")).toBe(false);
+    expect(
+      body?.querySelector('[aria-live], [role="status"], [role="alert"]'),
+    ).toBeNull();
+
+    const simplified = caption?.querySelector<HTMLButtonElement>(
+      '[data-caption-script="simplified"]',
+    );
+    const traditional = caption?.querySelector<HTMLButtonElement>(
+      '[data-caption-script="traditional"]',
+    );
+    const pinyin = caption?.querySelector<HTMLButtonElement>(
+      "[data-caption-pinyin]",
+    );
+    const size28 = caption?.querySelector<HTMLButtonElement>(
+      '[data-caption-font-size="28"]',
+    );
+    const size36 = caption?.querySelector<HTMLButtonElement>(
+      '[data-caption-font-size="36"]',
+    );
+    const size48 = caption?.querySelector<HTMLButtonElement>(
+      '[data-caption-font-size="48"]',
+    );
+
+    expect(simplified?.getAttribute("aria-pressed")).toBe("true");
+    expect(traditional?.getAttribute("aria-pressed")).toBe("false");
+    expect(pinyin?.getAttribute("aria-pressed")).toBe("false");
+    expect(size28?.getAttribute("aria-pressed")).toBe("false");
+    expect(size36?.getAttribute("aria-pressed")).toBe("true");
+    expect(size48?.getAttribute("aria-pressed")).toBe("false");
+
+    traditional?.click();
+    simplified?.click();
+    pinyin?.click();
+    size28?.click();
+    size36?.click();
+    size48?.click();
+    expect(onScriptChange.mock.calls).toEqual([
+      ["traditional"],
+      ["simplified"],
+    ]);
+    expect(onPinyinChange).toHaveBeenCalledWith(true);
+    expect(onFontSizeChange.mock.calls).toEqual([[28], [36], [48]]);
+
+    ui.updateState({
+      ...defaultState,
+      captionScript: "traditional",
+      captionPinyinEnabled: true,
+      captionFontSize: 48,
+    });
+    expect(simplified?.getAttribute("aria-pressed")).toBe("false");
+    expect(traditional?.getAttribute("aria-pressed")).toBe("true");
+    expect(pinyin?.getAttribute("aria-pressed")).toBe("true");
+    expect(size28?.getAttribute("aria-pressed")).toBe("false");
+    expect(size36?.getAttribute("aria-pressed")).toBe("false");
+    expect(size48?.getAttribute("aria-pressed")).toBe("true");
+    expect(caption?.style.getPropertyValue("--a11y-caption-font-size")).toBe(
+      "48px",
+    );
+
+    pinyin?.click();
+    expect(onPinyinChange.mock.calls).toEqual([[true], [false]]);
+
+    ui.destroy();
+    host.remove();
+  });
+
+  it("renders untrusted caption content through text nodes in pinyin mode", () => {
+    const { host, shadow, ui } = createToolbar();
+    const source =
+      '文本：<img src=x onerror="globalThis.captionInjected=true"> 汉字 & <script>坏</script>';
+    ui.updateState({
+      ...defaultState,
+      captionEnabled: true,
+      captionPinyinEnabled: true,
+    });
+    ui.showCaption({ text: source, status: "显示中" }, true);
+
+    const text = shadow.querySelector<HTMLElement>(
+      ".a11y-large-caption__text",
+    );
+    expect(text?.querySelector("img, script")).toBeNull();
+    expect(
+      Array.from(
+        text?.querySelectorAll<HTMLElement>(
+          ".a11y-large-caption__written",
+        ) ?? [],
+      )
+        .map((node) => node.textContent ?? "")
+        .join(""),
+    ).toBe(source);
+    expect(
+      (globalThis as typeof globalThis & { captionInjected?: boolean })
+        .captionInjected,
+    ).not.toBe(true);
+
+    ui.destroy();
+    host.remove();
+  });
+
+  it("returns focus to the visible large-caption entry after explicit close", () => {
+    const onCaptionClose = vi.fn();
+    const { host, shadow, ui } = createToolbar(
+      mergeConfig(DEFAULT_CONFIG),
+      vi.fn(),
+      { onCaptionClose },
+    );
+    ui.updateState({
+      ...defaultState,
+      isReadScreen: true,
+      captionEnabled: true,
+    });
+    ui.showCaption({ text: "当前字幕", status: "朗读中" }, true);
+
+    const [mainCaption, screenCaption] = getControls(shadow, "largeCaption");
+    const close = shadow.querySelector<HTMLButtonElement>(
+      ".a11y-large-caption__close",
+    );
+    expect(mainCaption?.closest<HTMLElement>('[data-mode="main"]')?.hidden)
+      .toBe(true);
+    expect(screenCaption?.closest<HTMLElement>('[data-mode="screen"]')?.hidden)
+      .toBe(false);
+
+    close?.focus();
+    close?.click();
+    expect(onCaptionClose).toHaveBeenCalledTimes(1);
+    expect(shadow.activeElement).toBe(screenCaption);
+
+    ui.destroy();
+    host.remove();
+  });
+
+  it("returns focus to the remembered page target when the toolbar is collapsed", () => {
+    const pageTarget = document.createElement("button");
+    pageTarget.textContent = "页面返回点";
+    document.body.append(pageTarget);
+    pageTarget.focus();
+    const onCaptionClose = vi.fn();
+    const { host, shadow, ui } = createToolbar(
+      mergeConfig(DEFAULT_CONFIG),
+      vi.fn(),
+      { onCaptionClose },
+    );
+    ui.updateState({
+      ...defaultState,
+      isPinned: true,
+      isCollapsed: true,
+      captionEnabled: true,
+    });
+    ui.showCaption({ text: "当前字幕", status: "显示中" }, true);
+
+    const close = shadow.querySelector<HTMLButtonElement>(
+      ".a11y-large-caption__close",
+    );
+    close?.focus();
+    close?.click();
+
+    expect(onCaptionClose).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(pageTarget);
+
+    ui.destroy();
+    host.remove();
+    pageTarget.remove();
   });
 
   it("operates the non-modal voice dialog and returns focus on Escape", () => {
@@ -431,6 +648,7 @@ describe("ToolbarUI", () => {
       "region:content",
       "screenSound",
       "continuousReading",
+      "largeCaption",
       "help",
       "readScreen",
       "exit",
@@ -575,6 +793,8 @@ describe("ToolbarUI", () => {
       "region:service",
       "region:list",
       "region:content",
+      "continuousReading",
+      "largeCaption",
       "readScreen",
     ]);
     ui.destroy();
@@ -1043,6 +1263,10 @@ const defaultState: AccessibilityToolState = {
   isReadScreen: false,
   readingEnabled: false,
   continuousReadingState: "idle",
+  captionEnabled: false,
+  captionFontSize: 36,
+  captionScript: "simplified",
+  captionPinyinEnabled: false,
   speechRate: 1,
   colorScheme: "original",
   zoom: 1,

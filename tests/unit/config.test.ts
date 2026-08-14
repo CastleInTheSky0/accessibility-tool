@@ -45,6 +45,7 @@ describe("configuration", () => {
       "largeCursor",
       "crosshair",
       "fullscreen",
+      "largeCaption",
       "pin",
       "reset",
       "help",

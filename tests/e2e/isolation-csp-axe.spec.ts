@@ -82,6 +82,17 @@ test("honors disabled semantic auto-detection", async ({ page }) => {
 test("adds no serious or critical axe violations", async ({ page }) => {
   await page.goto("/demos/semantic-off.html?debug=1");
   await page.getByRole("button", { name: "打开工具" }).click();
+  const host = page.locator("[data-a11y-tool-host]");
+  await host.locator('[data-action="largeCaption"]').first().click();
+  await page.evaluate(() => {
+    const target = document.createElement("p");
+    target.id = "axe-caption-target";
+    target.tabIndex = 0;
+    target.textContent = "大字幕无障碍检查";
+    document.body.append(target);
+    target.focus();
+  });
+  await expect(host.locator(".a11y-large-caption")).toBeVisible();
   const results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
     .analyze();

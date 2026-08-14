@@ -1141,6 +1141,187 @@ $overlay-z: 2147483645;
   width: var(--a11y-highlight-width, 0);
 }
 
+.a11y-large-caption,
+.a11y-large-caption *,
+.a11y-large-caption *::before,
+.a11y-large-caption *::after {
+  box-sizing: border-box;
+}
+
+.a11y-large-caption {
+  --a11y-caption-bg: #101316;
+  --a11y-caption-fg: #fff;
+  --a11y-caption-border: var(--a11y-accent);
+  --a11y-caption-control-bg: #292e32;
+  --a11y-caption-control-fg: #fff;
+
+  all: initial;
+  background: var(--a11y-caption-bg);
+  border-block-start: 3px solid var(--a11y-caption-border);
+  bottom: 0;
+  box-sizing: border-box;
+  box-shadow: 0 -8px 28px rgb(0 0 0 / 38%);
+  color: var(--a11y-caption-fg);
+  display: flex;
+  flex-direction: column;
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  left: 0;
+  line-height: 1.45;
+  max-height: 32vh;
+  min-width: 0;
+  overflow: hidden;
+  position: fixed;
+  right: 0;
+  width: auto;
+  z-index: $toolbar-z;
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+.a11y-large-caption__controls {
+  align-items: center;
+  background: color-mix(in srgb, var(--a11y-caption-bg) 90%, #fff);
+  border-block-end: 1px solid
+    color-mix(in srgb, var(--a11y-caption-fg) 28%, transparent);
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 48px;
+  padding: 7px 16px;
+}
+
+.a11y-large-caption__status {
+  background: var(--a11y-caption-border);
+  border-radius: 999px;
+  color: var(--a11y-caption-bg);
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 5px 10px;
+}
+
+.a11y-large-caption__group {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.a11y-large-caption__button {
+  appearance: none;
+  background: var(--a11y-caption-control-bg);
+  border: 1px solid
+    color-mix(in srgb, var(--a11y-caption-control-fg) 38%, transparent);
+  border-radius: 7px;
+  color: var(--a11y-caption-control-fg);
+  cursor: pointer;
+  font: 700 13px/1.2 Inter, "PingFang SC", "Microsoft YaHei", system-ui,
+    sans-serif;
+  min-height: 32px;
+  min-width: 44px;
+  padding: 6px 10px;
+
+  &[aria-pressed="true"] {
+    background: var(--a11y-caption-border);
+    border-color: var(--a11y-caption-border);
+    color: var(--a11y-caption-bg);
+  }
+
+  &:hover {
+    filter: brightness(1.14);
+  }
+
+  &:focus-visible {
+    outline: 3px solid var(--a11y-focus);
+    outline-offset: 2px;
+  }
+}
+
+.a11y-large-caption__close {
+  margin-inline-start: auto;
+}
+
+.a11y-large-caption__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 14px clamp(16px, 3vw, 48px) 18px;
+  scrollbar-color: var(--a11y-caption-border) var(--a11y-caption-bg);
+
+  &:focus-visible {
+    outline: 3px solid var(--a11y-focus);
+    outline-offset: -5px;
+  }
+}
+
+.a11y-large-caption__text {
+  color: inherit;
+  font-size: var(--a11y-caption-font-size, 36px);
+  font-weight: 700;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.a11y-large-caption__unit {
+  display: inline-flex;
+  flex-direction: column;
+  margin-inline-end: 0.08em;
+  text-align: center;
+  vertical-align: bottom;
+}
+
+.a11y-large-caption__pinyin {
+  display: block;
+  font-size: 0.42em;
+  font-weight: 600;
+  line-height: 1.2;
+  min-height: 1.2em;
+  white-space: nowrap;
+}
+
+.a11y-large-caption__written {
+  display: block;
+  white-space: pre-wrap;
+}
+
+:host([data-a11y-color-scheme="white-black"]) .a11y-large-caption {
+  --a11y-caption-bg: #fff;
+  --a11y-caption-fg: #000;
+  --a11y-caption-border: #000;
+  --a11y-caption-control-bg: #f1f1f1;
+  --a11y-caption-control-fg: #000;
+}
+
+:host([data-a11y-color-scheme="black-yellow"]) .a11y-large-caption {
+  --a11y-caption-bg: #000;
+  --a11y-caption-fg: #ffea00;
+  --a11y-caption-border: #ffea00;
+  --a11y-caption-control-bg: #1e1e1e;
+  --a11y-caption-control-fg: #ffea00;
+}
+
+:host([data-a11y-color-scheme="yellow-black"]) .a11y-large-caption {
+  --a11y-caption-bg: #ffe600;
+  --a11y-caption-fg: #000;
+  --a11y-caption-border: #000;
+  --a11y-caption-control-bg: #fff36a;
+  --a11y-caption-control-fg: #000;
+}
+
+:host([data-a11y-color-scheme="blue-white"]) .a11y-large-caption {
+  --a11y-caption-bg: #064b9b;
+  --a11y-caption-fg: #fff;
+  --a11y-caption-border: #fff;
+  --a11y-caption-control-bg: #0b3970;
+  --a11y-caption-control-fg: #fff;
+}
+
 html[data-a11y-color-scheme="white-black"] {
   @include page-colors(#fff, #000);
 }
@@ -1208,13 +1389,18 @@ html[data-a11y-large-cursor]
 }
 
 :host([data-a11y-tool-large-cursor]) [data-a11y-tool-root],
-:host([data-a11y-tool-large-cursor]) [data-a11y-tool-root] * {
+:host([data-a11y-tool-large-cursor]) [data-a11y-tool-root] *,
+:host([data-a11y-tool-large-cursor]) .a11y-large-caption,
+:host([data-a11y-tool-large-cursor]) .a11y-large-caption * {
   cursor: $arrow-cursor, default !important;
 }
 
 :host([data-a11y-tool-large-cursor])
   [data-a11y-tool-root]
-  :where(button, a, select, label, input[type="range"]) {
+  :where(button, a, select, label, input[type="range"]),
+:host([data-a11y-tool-large-cursor])
+  .a11y-large-caption
+  :where(button) {
   cursor: $pointer-cursor, pointer !important;
 }
 
@@ -1277,7 +1463,8 @@ html[data-a11y-large-cursor]
   }
 
   .a11y-voice-settings,
-  .a11y-continuous-reading {
+  .a11y-continuous-reading,
+  .a11y-large-caption {
     animation: none !important;
   }
 }
@@ -1291,8 +1478,11 @@ html[data-a11y-large-cursor]
   .a11y-control__icon,
   .a11y-reveal,
   .a11y-voice-settings,
-  .a11y-continuous-reading,
-  .a11y-voice-settings__voice,
+    .a11y-continuous-reading,
+    .a11y-large-caption,
+    .a11y-large-caption__button,
+    .a11y-large-caption__body,
+    .a11y-voice-settings__voice,
   .a11y-voice-settings__button,
   .a11y-voice-settings__select,
   .a11y-continuous-reading__button {
@@ -1309,6 +1499,28 @@ html[data-a11y-large-cursor]
   }
 
   .a11y-control:focus-visible {
+    outline-color: Highlight;
+  }
+
+  .a11y-large-caption {
+    background: Canvas;
+    border-color: CanvasText;
+    color: CanvasText;
+  }
+
+  .a11y-large-caption__controls {
+    background: Canvas;
+    border-color: CanvasText;
+  }
+
+  .a11y-large-caption__status,
+  .a11y-large-caption__button[aria-pressed="true"] {
+    background: Highlight;
+    color: HighlightText;
+  }
+
+  .a11y-large-caption__button:focus-visible,
+  .a11y-large-caption__body:focus-visible {
     outline-color: Highlight;
   }
 

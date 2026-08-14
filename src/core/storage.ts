@@ -1,5 +1,7 @@
 import { COLOR_SCHEMES } from "./constants";
 import type {
+  CaptionFontSize,
+  CaptionScript,
   ColorScheme,
   PersistedPreferences,
   PersistedVoicePreference,
@@ -24,6 +26,12 @@ const isFiniteNumber = (value: unknown): value is number =>
 const isColorScheme = (value: unknown): value is ColorScheme =>
   typeof value === "string" &&
   (COLOR_SCHEMES as readonly string[]).includes(value);
+
+const isCaptionFontSize = (value: unknown): value is CaptionFontSize =>
+  value === 28 || value === 36 || value === 48;
+
+const isCaptionScript = (value: unknown): value is CaptionScript =>
+  value === "simplified" || value === "traditional";
 
 function parseVoicePreference(
   value: unknown,
@@ -77,6 +85,18 @@ function parsePreferences(value: unknown): PersistedPreferences | null {
     isPinned: candidate.isPinned,
     isReadScreen: candidate.isReadScreen,
   };
+  if (isBoolean(candidate.captionEnabled)) {
+    parsed.captionEnabled = candidate.captionEnabled;
+  }
+  if (isCaptionFontSize(candidate.captionFontSize)) {
+    parsed.captionFontSize = candidate.captionFontSize;
+  }
+  if (isCaptionScript(candidate.captionScript)) {
+    parsed.captionScript = candidate.captionScript;
+  }
+  if (isBoolean(candidate.captionPinyinEnabled)) {
+    parsed.captionPinyinEnabled = candidate.captionPinyinEnabled;
+  }
   if (
     typeof candidate.preferredLanguage === "string" &&
     candidate.preferredLanguage.trim()

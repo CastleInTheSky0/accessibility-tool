@@ -14,8 +14,12 @@ import {
   ContinuousReadingSettingsUI,
   type ContinuousReadingSettingsModel,
 } from "./continuous-reading-settings";
+import { LargeCaptionUI } from "./large-caption";
+import type { CaptionOutputModel } from "../features/output";
 import type {
   AccessibilityToolState,
+  CaptionFontSize,
+  CaptionScript,
   ColorScheme,
   FeatureId,
   RegionChangeEvent,
@@ -39,6 +43,10 @@ interface ToolbarCallbacks {
   onContinuousReadingResume?: () => void;
   onContinuousReadingStop?: () => void;
   onContinuousReadingSettingsClose?: () => void;
+  onCaptionClose?: () => void;
+  onCaptionFontSizeChange?: (size: CaptionFontSize) => void;
+  onCaptionScriptChange?: (script: CaptionScript) => void;
+  onCaptionPinyinChange?: (enabled: boolean) => void;
 }
 
 const FEATURE_LABELS: Readonly<Record<FeatureId, string>> = {
@@ -52,6 +60,7 @@ const FEATURE_LABELS: Readonly<Record<FeatureId, string>> = {
   largeCursor: "大鼠标",
   crosshair: "十字线",
   fullscreen: "大界面",
+  largeCaption: "大字幕",
   pin: "固定",
   reset: "重置",
   help: "帮助",
@@ -129,6 +138,9 @@ const ICONS: Readonly<Record<string, string>> = {
   largeCursor: TOGGLE_ICONS.cursor.off,
   crosshair: TOGGLE_ICONS.crosshair.off,
   fullscreen: TOGGLE_ICONS.fullscreen.off,
+  largeCaption: createSvgIcon(
+    '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M6 9h12M6 13h8M6 17h5"/>',
+  ),
   pin: TOGGLE_ICONS.pin.off,
   reset: createSvgIcon(
     '<path d="M5 8V3m0 0h5M5 3l3.5 3.5A8 8 0 1 1 4 13"/>',
@@ -166,6 +178,7 @@ const SWITCH_FEATURES = new Set<FeatureId>([
   "largeCursor",
   "crosshair",
   "fullscreen",
+  "largeCaption",
   "pin",
   "readScreen",
 ]);
@@ -184,6 +197,7 @@ export class ToolbarUI {
   private readonly highlight: HTMLDivElement;
   private readonly voiceSettings: VoiceSettingsUI;
   private readonly continuousReadingSettings: ContinuousReadingSettingsUI;
+  private readonly largeCaption: LargeCaptionUI;
   private readonly controls = new Map<ToolbarAction, HTMLElement>();
   private regionCounts: Record<RegionType, number> = {
     viewport: 0,
@@ -297,6 +311,19 @@ export class ToolbarUI {
       },
     );
     shadowRoot.append(this.root);
+    this.largeCaption = new LargeCaptionUI(document, shadowRoot, {
+      onClose: () => this.callbacks.onCaptionClose?.(),
+      onFontSizeChange: (size) =>
+        this.callbacks.onCaptionFontSizeChange?.(size),
+      onScriptChange: (script) =>
+        this.callbacks.onCaptionScriptChange?.(script),
+      onPinyinChange: (enabled) =>
+        this.callbacks.onCaptionPinyinChange?.(enabled),
+      resolveRestoreControl: () =>
+        this.host.hasAttribute("data-a11y-tool-collapsed")
+          ? null
+          : this.findVisibleControl("largeCaption"),
+    });
 
     this.bindEvents();
     this.updateHelpLinks();
@@ -331,6 +358,7 @@ export class ToolbarUI {
     this.setCurrentRegion(null);
     this.hideCrosshair();
     this.hideHighlight();
+    this.largeCaption.hide();
     this.root.hidden = true;
     this.host.hidden = true;
   }
@@ -339,6 +367,7 @@ export class ToolbarUI {
     this.cancelCollapse();
     this.voiceSettings.destroy();
     this.continuousReadingSettings.destroy();
+    this.largeCaption.destroy();
     this.root.remove();
   }
 
@@ -351,6 +380,7 @@ export class ToolbarUI {
       "data-a11y-tool-large-cursor",
       state.largeCursor,
     );
+    this.host.dataset.a11yColorScheme = state.colorScheme;
     this.root.toggleAttribute("data-read-screen", state.isReadScreen);
     this.mainGroup.hidden = state.isReadScreen;
     this.screenGroup.hidden = !state.isReadScreen;
@@ -363,6 +393,7 @@ export class ToolbarUI {
     this.continuousReadingSettings.update(
       this.continuousReadingSettingsModel,
     );
+    this.largeCaption.updatePreferences(state);
 
     for (const feature of MAIN_FEATURE_ORDER) {
       for (const control of this.findControls(feature)) {
@@ -412,6 +443,14 @@ export class ToolbarUI {
   ): void {
     this.continuousReadingSettingsModel = model;
     this.continuousReadingSettings.update(model);
+  }
+
+  showCaption(model: CaptionOutputModel, resetScroll: boolean): void {
+    this.largeCaption.show(model, resetScroll);
+  }
+
+  hideCaption(): void {
+    this.largeCaption.hide();
   }
 
   toggleVoiceSettings(): void {
@@ -633,7 +672,9 @@ export class ToolbarUI {
     for (const feature of MAIN_FEATURE_ORDER) {
       if (
         !this.config.features[feature] ||
-        (feature === "continuousReading" && !this.config.features.reading)
+        (feature === "continuousReading" &&
+          !this.config.features.reading &&
+          !this.config.features.largeCaption)
       ) {
         continue;
       }
@@ -651,12 +692,15 @@ export class ToolbarUI {
       this.screenGroup.append(this.createControl("screenSound", "朗读"));
     }
     if (
-      this.config.features.reading &&
+      (this.config.features.reading || this.config.features.largeCaption) &&
       this.config.features.continuousReading
     ) {
       this.screenGroup.append(
         this.createControl("continuousReading", "连续朗读"),
       );
+    }
+    if (this.config.features.largeCaption) {
+      this.screenGroup.append(this.createControl("largeCaption", "大字幕"));
     }
     if (this.config.features.help) {
       this.screenGroup.append(this.createControl("help", "帮助"));
@@ -888,6 +932,8 @@ export class ToolbarUI {
         return state.crosshair;
       case "fullscreen":
         return state.isFullscreen;
+      case "largeCaption":
+        return state.captionEnabled;
       case "pin":
         return state.isPinned;
       case "readScreen":
@@ -968,6 +1014,12 @@ export class ToolbarUI {
           `大界面，当前${state.isFullscreen ? "全屏" : "标准"}`,
         );
         break;
+      case "largeCaption": {
+        const captionState = state.captionEnabled ? "开启" : "关闭";
+        meta.textContent = captionState;
+        control.setAttribute("aria-label", `大字幕，当前${captionState}`);
+        break;
+      }
       case "pin":
         meta.textContent = state.isPinned ? "已开启" : "自动收起";
         control.setAttribute(
@@ -1126,6 +1178,11 @@ function getIconPresentation(
           ? TOGGLE_ICONS.fullscreen.on
           : TOGGLE_ICONS.fullscreen.off,
         state: state.isFullscreen ? "fullscreen-exit" : "fullscreen-enter",
+      };
+    case "largeCaption":
+      return {
+        markup: ICONS.largeCaption ?? "",
+        state: `large-caption-${state.captionEnabled ? "on" : "off"}`,
       };
     case "pin":
       return {

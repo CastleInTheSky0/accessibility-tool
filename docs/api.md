@@ -145,6 +145,28 @@ registration.dispose();
 | `tabs` | 见下表 | 标准选项卡和浮层增强 |
 | `colorExclusions` | `[]` | 不参与页面配色的 CSS 选择器 |
 
+`features` 支持这些稳定功能 ID：
+
+```ts
+type FeatureId =
+  | "reading"
+  | "continuousReading"
+  | "speechRate"
+  | "voiceSelection"
+  | "colorScheme"
+  | "zoomIn"
+  | "zoomOut"
+  | "largeCursor"
+  | "crosshair"
+  | "fullscreen"
+  | "largeCaption"
+  | "pin"
+  | "reset"
+  | "help"
+  | "readScreen"
+  | "exit";
+```
+
 ### 打开状态持久化
 
 - 打开意图使用 `${storageKey}:open-state` 独立存储，并有自己的版本字段；不会修改现有偏好 payload 或偏好版本。
@@ -158,7 +180,7 @@ registration.dispose();
 
 ### `toolbar`
 
-桌面主工具栏固定为单排，功能顺序由内部常量保持稳定；完整主模式共有 15 个控件，其中顺序固定为“朗读 → 连续朗读 → 语速 → 音色 → 配色”。工具栏外层继续占满视口，品牌与控件共享的内部版心为 `width: 100%`、`max-width: 1280px`；1024～1279px 使用紧凑单排布局。
+桌面主工具栏固定为单排，功能顺序由内部常量保持稳定；完整主模式共有 16 个控件，其中“语速 → 音色 → 配色”和“大界面 → 大字幕 → 固定”的相对顺序固定。工具栏外层继续占满视口，品牌与控件共享的内部版心为 `width: 100%`、`max-width: 1280px`；1024～1279px 使用紧凑单排布局。
 
 | 字段 | 默认值 |
 | --- | --- |
@@ -193,13 +215,23 @@ interface SpeechAdapter {
 
 - `features.continuousReading` 依赖 `features.reading`。主模式和读屏专用模式的“连续朗读”入口连接同一会话，并打开 Shadow DOM 内 anchored、非模态“连续朗读控制”面板。
 - 面板提供开始、暂停／继续和停止。Esc、关闭按钮或面板外操作只关闭面板，不停止仍在播放的会话；显式关闭后焦点返回当前连接的入口。
-- 开始前先检查 `SpeechAdapter.isSupported()`。不支持时保持 `readingEnabled` 和连续状态不变；支持但当前范围为空时会保留自动开启并持久化的 `readingEnabled`，连续状态仍为 `idle`，两种情况都只通过 live region 说明原因。
+- 开始前先检查可用输出。语音和大字幕都不可用时保持 `readingEnabled` 和连续状态不变；语音不可用但大字幕已开启时，以纯文字计时模式运行同一队列且不伪造 `speechstart` / `speechend`。当前范围为空时保持连续状态 `idle`，字幕模式不会反向开启音频朗读。
 - 默认起点依次为工具栏接管前最后一个有效页面目标、当前盲道区域首个有效段落、页面首个有效段落。自动推进不移动键盘焦点，只更新朗读高亮并在需要时滚动。
 - 每次启动冻结一个有限 composed-tree 队列，按页面顺序进入 open Shadow Root、slot 和同源 iframe；未标记正文也会参与。新插入的普通内容留到下次启动，已有成员在每段前重新解析当前文本、语言、语速和音色。
 - 当前有效 tab 控件作为原子项朗读；只有启动时可见的当前 panel 内容逐段进入队列，隐藏 panel 不会被读取或自动激活。模态 dialog 打开会停止背景会话；在 dialog 内重新开始时只读取最内层活动 dialog。
 - 自动遍历不朗读 editable 输入值。密码、验证码（含 `autocomplete="one-time-code"`）、支付字段、显式敏感内容、配置忽略项，以及被这些节点提供的 label、ARIA 名称、说明或当前选项文本都会被排除；单次主动聚焦／点击的普通 editable 朗读行为保持不变。
-- 暂停通过取消当前请求实现，继续从被中断段落开头重播。用户页面交互、其他显式语音、音色试听、路由、dialog、关闭朗读和生命周期清理都会按对应原因结束会话；语速、默认语言或音色偏好调整从下一段生效，不抢占当前段。
-- 所有段落继续经过唯一的 `SpeechController → SpeechAdapter`。自定义 adapter 的同步 `speak()` 异常会转换为一次有效语音错误；`cancel()` 异常不会阻断暂停、停止或清理。连续朗读不保存正文，也不发起网络请求。
+- 音频段暂停时取消当前请求，继续后从该段开头重播；纯文字或音频失败回退段会冻结剩余计时，继续时从剩余时间恢复。用户页面交互、其他显式语音、音色试听、路由、dialog 和生命周期清理都会按对应原因结束会话；关闭朗读但保留大字幕时，当前段转为纯文字并继续。语速、默认语言、音色或重新开启音频从下一段生效，不重启当前纯文字段。
+- 所有段落继续经过唯一的输出协调器；真实音频仍使用 `SpeechController → SpeechAdapter`。自定义 adapter 的同步 `speak()` 异常只产生一次有效语音错误：有字幕时当前段转为纯文字，无字幕时才以 `error` 结束会话；`cancel()` 异常不会阻断暂停、停止或清理。连续朗读不保存正文，也不发起网络请求。
+
+### 大字幕
+
+- `features.largeCaption` 控制主模式和读屏专用模式中的同一个“大字幕”开关。它独立于“朗读”：开启字幕不会开启音频，关闭音频也不会关闭字幕。
+- 默认偏好为关闭、`36px`、简体、拼音关闭；可选字号为 `28 / 36 / 48px`。这四个设置存入现有 version 1 偏好 payload，旧版 payload 缺少字段时安全采用默认值；当前或历史字幕正文永不进入存储、事件或日志。
+- 字幕固定铺满视口底部，最大高度约 `32vh`。控制区保持可见，正文区域独立纵向滚动，并使用可聚焦、具名的普通 `role="region"`；正文不使用 `aria-live`、`status` 或 `alert`，拼音注音对辅助技术隐藏，避免重复播报。
+- 简繁转换使用静态打包的 `opencc-js` 标准 `cn2t / t2cn`，拼音使用静态打包的 `pinyin-pro` 带声调输出。两者始终从同一原文快照生成，转换失败时保留原文或仅省略拼音，不改变语音输入。
+- 默认第三方接入只加载 `dist/accessibility-tool.min.js`；主 IIFE 已包含样式、转换代码和数据，不需要 CDN、动态 import、额外语言包或运行时字典请求。`dist/accessibility-tool.css` 只用于可选的严格 CSP 外链样式接入。
+- 有效音频只在匹配请求真正 `onStart` 后显示为“朗读中”。语音不可用或启动失败时显示“显示中”，按当前语速估算 `3–15s`；中途失败扣除已播放时间并至少保留 `1s`。正常结束显示“已结束”约 `3s`，暂停显示“已暂停”。旧回调和旧计时器不能覆盖新文本。
+- 显式“关闭大字幕”只关闭视觉输出并按当前入口、此前页面焦点、`body` 的顺序恢复焦点。自动结束、路由、重置、`close()` 或 `destroy()` 清理正文和计时器但不移动焦点。
 
 ### 浏览器本地音色选择
 
@@ -281,6 +313,10 @@ interface AccessibilityToolState {
   largeCursor: boolean;
   crosshair: boolean;
   isFullscreen: boolean;
+  captionEnabled: boolean;
+  captionFontSize: 28 | 36 | 48;
+  captionScript: "simplified" | "traditional";
+  captionPinyinEnabled: boolean;
 }
 ```
 
@@ -331,9 +367,9 @@ interface ContinuousReadingEvents {
 }
 ```
 
-`index`／`count` 描述启动时冻结的队列；运行中失效并被跳过的成员不会触发 `continuousreadingsegmentchange`，因此 `index` 可以跳号。公共 payload 不包含正文、Element、语言、区域标签或内部 generation；当前有效段落只由内部 reading provider 暴露给后续大字幕功能。
+`index`／`count` 描述启动时冻结的队列；运行中失效并被跳过的成员不会触发 `continuousreadingsegmentchange`，因此 `index` 可以跳号。公共 payload 不包含正文、Element、语言、区域标签或内部 generation；当前有效段落只在内部 reading provider 与输出协调器之间流转。
 
-首次有效启动的事件顺序为：必要的 `readingEnabled` `statechange` → `continuousReadingState="playing"` `statechange` → `continuousreadingstart` → 首段 `continuousreadingsegmentchange` → `speechstart`。有效错误顺序为唯一 `error` → idle `statechange` → reason=`error` 的 `continuousreadingstop`；取消或过期回调不会补发 `speechend`／`error`。
+音频首次有效启动的事件顺序为：必要的 `readingEnabled` `statechange` → `continuousReadingState="playing"` `statechange` → `continuousreadingstart` → 首段 `continuousreadingsegmentchange` → `speechstart`。无字幕回退时，有效错误顺序为唯一 `error` → idle `statechange` → reason=`error` 的 `continuousreadingstop`；字幕开启时，启动前或中途错误只发一次 `error` 并转纯文字，不伪造 `speechstart`／`speechend`，会话继续推进。取消或过期回调不会补发事件。
 
 ```js
 const onRegion = ({ type, index, count, label }) => {

@@ -170,7 +170,7 @@ test("refreshes an initially empty local catalog, previews the selected current 
   expect(replacement?.objectId).not.toBe(firstObjectId);
 });
 
-test("keeps the 15-control toolbar on one row with a centered 1280px maximum frame", async ({
+test("keeps the 16-control toolbar on one row with a centered 1280px maximum frame", async ({
   page,
 }) => {
   await page.getByRole("button", { name: "打开无障碍工具" }).click();
@@ -223,12 +223,12 @@ test("keeps the 15-control toolbar on one row with a centered 1280px maximum fra
       "voiceSelection",
       "colorScheme",
     ]);
-    expect(metrics.controlCount).toBe(15);
+    expect(metrics.controlCount).toBe(16);
     expect(metrics.outerWidth).toBeCloseTo(width, 1);
     expect(metrics.frameWidth).toBeCloseTo(Math.min(width, 1280), 1);
     expect(metrics.frameWidth).toBeLessThanOrEqual(1280);
     expect(metrics.frameCenterDelta).toBeLessThanOrEqual(0.5);
-    expect(metrics.minimumControlWidth).toBeGreaterThanOrEqual(60);
+    expect(metrics.minimumControlWidth).toBeGreaterThanOrEqual(57);
     expect(metrics.rowTopSpread).toBeLessThanOrEqual(1);
     expect(metrics.scrollOverflow).toBeLessThanOrEqual(1);
     expect(metrics.clipped).toBe(false);

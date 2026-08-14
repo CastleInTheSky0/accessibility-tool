@@ -460,6 +460,45 @@ describe("continuous reading sequence", () => {
 });
 
 describe("ReadingController continuous session", () => {
+  it("ignores hover reading but keeps explicit click takeover active", () => {
+    vi.useFakeTimers();
+    try {
+      document.body.innerHTML = `
+        <p id="hover-current">当前连续朗读段落</p>
+        <p id="hover-next">鼠标悬停段落</p>
+      `;
+      const adapter = new ControlledSpeechAdapter();
+      const stops: string[] = [];
+      const reading = createReadingController(
+        adapter,
+        new TypedEmitter<AccessibilityToolEventMap>(),
+        { onStop: ({ reason }) => stops.push(reason) },
+      );
+      reading.setRoots([document]);
+      reading.start();
+
+      expect(reading.startContinuous()).toBe("started");
+      get("hover-next").dispatchEvent(
+        new MouseEvent("pointerover", { bubbles: true, composed: true }),
+      );
+      vi.advanceTimersByTime(DEFAULT_CONFIG.speech.hoverDelayMs);
+
+      expect(reading.getContinuousState()).toBe("playing");
+      expect(adapter.requests).toHaveLength(1);
+      expect(stops).toEqual([]);
+
+      get("hover-next").dispatchEvent(
+        new MouseEvent("click", { bubbles: true, composed: true }),
+      );
+      expect(reading.getContinuousState()).toBe("idle");
+      expect(adapter.requests.at(-1)?.text).toBe("文本：鼠标悬停段落");
+      expect(stops).toEqual(["interaction"]);
+      reading.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps event order, skips invalid members and resumes the interrupted segment", () => {
     document.body.innerHTML = `
       <h1 id="first">第一段</h1>

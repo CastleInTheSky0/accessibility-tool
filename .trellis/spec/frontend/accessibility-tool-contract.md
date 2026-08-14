@@ -5,7 +5,7 @@
 ### 1. Scope / Trigger
 
 - Trigger: any change to the public singleton API, toolbar feature set, blind-path region protocol, tab/dialog enhancement, preference persistence, or build output.
-- Runtime scope: browser-native TypeScript with zero runtime dependencies; desktop layouts start at 1024px.
+- Runtime scope: browser-native TypeScript with no independently loaded runtime dependencies; `opencc-js` and `pinyin-pro` implementation code/data are bundled at build time, and desktop layouts start at 1024px.
 - Lifecycle boundary: importing the bundle with no valid saved open intent must not render UI, scan the host page, or bind high-frequency listeners. A successful explicit `open()` may persist an open intent; on later same-origin pages that load the same bundle, runtime work may resume after DOM ready. All runtime work remains reversible through `close()`, `reset()`, or `destroy()`.
 - Styling boundary: author SCSS lives at `src/styles/accessibility-tool.scss`; Vite embeds it for the default bundle and emits `dist/accessibility-tool.css` for strict CSP integrations.
 
@@ -38,6 +38,23 @@ interface AccessibilityToolApi {
 
 type RegionCode = 1 | 2 | 3 | 4 | 5 | 6;
 type DomTarget = string | Element;
+type FeatureId =
+  | "reading"
+  | "continuousReading"
+  | "speechRate"
+  | "voiceSelection"
+  | "colorScheme"
+  | "zoomIn"
+  | "zoomOut"
+  | "largeCursor"
+  | "crosshair"
+  | "fullscreen"
+  | "largeCaption"
+  | "pin"
+  | "reset"
+  | "help"
+  | "readScreen"
+  | "exit";
 
 interface RegistrationHandle {
   dispose(): void;
@@ -72,6 +89,8 @@ dist/accessibility-tool.es.js   -> ESM default export
 dist/accessibility-tool.css     -> external CSP stylesheet
 dist/index.d.ts                  -> public TypeScript entry declaration
 ```
+
+The default third-party integration loads only `dist/accessibility-tool.min.js`. That IIFE contains the runtime styles, `opencc-js@1.4.1` conversion code/data, and `pinyin-pro@3.29.1`; it must not create language/data chunks, use dynamic imports, load a CDN script, or fetch any runtime language resource. `opencc-js/core`, `opencc-js/preset/cn2t`, `opencc-js/preset/t2cn`, and `pinyin-pro` are statically imported. `dist/accessibility-tool.css` remains an optional strict-CSP integration artifact rather than a dependency of the default IIFE.
 
 Development serving is isolated from those build signatures:
 
@@ -123,10 +142,17 @@ interface PersistedVoicePreference {
   lang: string;
 }
 
+type CaptionFontSize = 28 | 36 | 48;
+type CaptionScript = "simplified" | "traditional";
+
 interface PersistedPreferences {
   // Existing required v0.1 fields remain unchanged.
   preferredLanguage?: string;
   voice?: PersistedVoicePreference;
+  captionEnabled?: boolean;
+  captionFontSize?: CaptionFontSize;
+  captionScript?: CaptionScript;
+  captionPinyinEnabled?: boolean;
 }
 
 // Internal-only catalog boundary; it is not exported from the package entry.
@@ -215,6 +241,65 @@ interface ContinuousReadingEvents {
 interface AccessibilityToolState {
   // Existing fields remain unchanged.
   continuousReadingState: ContinuousReadingState;
+  captionEnabled: boolean;
+  captionFontSize: CaptionFontSize;
+  captionScript: CaptionScript;
+  captionPinyinEnabled: boolean;
+}
+```
+
+Large-caption output uses this internal-only coordinator boundary. It is not
+exported from the package entry and page text never crosses the public event
+layer:
+
+```ts
+type CaptionVisualStatus = "朗读中" | "显示中" | "已暂停" | "已结束";
+type OutputKind = "single" | "continuous" | "preview" | "announcement";
+
+interface CaptionOutputModel {
+  readonly text: string;
+  readonly status: CaptionVisualStatus;
+}
+
+interface CaptionOutputSink {
+  showCaption(model: CaptionOutputModel, resetScroll: boolean): void;
+  hideCaption(): void;
+}
+
+interface OutputRequestOptions {
+  kind: OutputKind;
+  forceAudio?: boolean;
+  onEnd?: () => void;
+  onError?: () => void;
+  onCancel?: () => void;
+}
+
+interface OutputStateProvider {
+  isAudioEnabled(): boolean;
+  isCaptionEnabled(): boolean;
+}
+
+declare class OutputCoordinator {
+  constructor(
+    speech: SpeechController,
+    caption: CaptionOutputSink,
+    state: OutputStateProvider,
+  );
+  isAudioSupported(): boolean;
+  canOutput(): boolean;
+  speak(
+    text: string,
+    lang: string,
+    rate: number,
+    options: OutputRequestOptions,
+  ): (() => void) | null;
+  cancel(): void;
+  pauseContinuous(): "audio" | "text" | null;
+  resumePausedText(): boolean;
+  transitionAudioToText(): void;
+  setCaptionEnabled(enabled: boolean): {
+    stopTextOnlyContinuous: boolean;
+  };
 }
 ```
 
@@ -232,26 +317,30 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 - The production toolbar uses a closed Shadow Root; `debug: true` uses an open Shadow Root and adds diagnostics. Every completed region scan logs its region count and elapsed time as `[AccessibilityTool] 区域扫描完成：N 个，X.Xms。` so release tests can measure the scanner without adding a public timing API.
 - `open({ trigger })` registers the trigger, manages `aria-controls` / `aria-expanded`, and returns focus to the latest connected trigger on close.
 - Explicit `open()` writes an open intent only after the runtime has opened successfully. Automatic restoration starts the full runtime and hydrates preferences, but must not infer a trigger from `document.activeElement`, move focus, or repeat the "toolbar opened" announcement.
-- The open intent uses an independent, versioned `${storageKey}:open-state` payload. It must not change the existing preference payload or preference version. Persist only reading, speech rate, color scheme, zoom, large cursor, crosshair, pinning, read-screen mode, the optional normalized preferred language, and the optional `{ voiceURI, name, lang }` voice descriptor in the version-1 preference payload; never persist fullscreen, spoken page text, or native `SpeechSynthesisVoice` objects. A v0.1 payload with no language or voice field remains valid, and an invalid optional field is ignored without discarding valid sibling preferences.
+- The open intent uses an independent, versioned `${storageKey}:open-state` payload. It must not change the existing preference payload or preference version. Persist only reading, speech rate, color scheme, zoom, large cursor, crosshair, pinning, read-screen mode, the optional normalized preferred language, the optional `{ voiceURI, name, lang }` voice descriptor, and the optional large-caption enabled/font-size/script/pinyin fields in the version-1 preference payload; never persist fullscreen, caption/page text, or native `SpeechSynthesisVoice` objects. A v0.1 payload with none of the newer optional fields remains valid, and each invalid optional field is ignored independently without discarding valid sibling preferences.
 - `close()`, the toolbar exit action, and `destroy()` clear the open intent. `reset()` clears preferences while preserving the current open state and open intent. `persistOpenState: false` clears the current marker and disables restoration.
 - Changing `storageKey` must clear any true marker under the previous key. If the runtime is open and persistence remains enabled, migrate the intent to the new derived key.
 - Restoration covers only same-origin navigation where the destination also loads and configures the same tool script. It does not inject into pages without the script, synchronize tabs in real time, or cross origins.
-- Main toolbar order is fixed by `MAIN_FEATURE_ORDER`; feature flags may remove controls but must not reorder the remaining controls. The full main toolbar has 15 controls, and `reading`, `continuousReading`, `speechRate`, `voiceSelection`, and `colorScheme` remain consecutive in that exact order.
-- The desktop toolbar is one fixed-height, single-row blind-path track. Its outer surface and Shadow Host always span the viewport, while one centered inner frame owns the brand rail, active mode controls, and continuous track together; that frame is `width: 100%` with `max-width: 1280px`. Its default height is `146px`; the 15-control main mode fits that frame, while 1024-1279px uses a compact full-width single-row fallback without horizontal scrolling, clipping, or changes to the roving keyboard model.
+- Main toolbar order is fixed by `MAIN_FEATURE_ORDER`; feature flags may remove controls but must not reorder the remaining controls. The full main toolbar has 16 controls in this exact order: `reading`, `continuousReading`, `speechRate`, `voiceSelection`, `colorScheme`, `zoomIn`, `zoomOut`, `largeCursor`, `crosshair`, `fullscreen`, `largeCaption`, `pin`, `reset`, `help`, `readScreen`, `exit`. In particular, `largeCaption` stays between `fullscreen` (`大界面`) and `pin` (`固定`).
+- The desktop toolbar is one fixed-height, single-row blind-path track. Its outer surface and Shadow Host always span the viewport, while one centered inner frame owns the brand rail, active mode controls, and continuous track together; that frame is `width: 100%` with `max-width: 1280px`. Its default height is `146px`; the 16-control main mode fits that frame, while 1024-1279px uses a compact full-width single-row fallback without horizontal scrolling, clipping, or changes to the roving keyboard model.
 - The left brand rail is presentation-only: it is `aria-hidden="true"`, contains no `data-toolbar-item`, and never enters the Tab order or accessible toolbar item count. It shows `A11Y / 辅助工具` in main mode and `盲道导航` in read-screen mode.
-- Main and read-screen modes use the same Host, root, and toolbar height. Switching `isReadScreen` must not change push-mode body padding or any configured `offsetSelectors` offset. Read-screen order is exactly the six `REGION_TYPES`, `screenSound`, `continuousReading`, `help`, `readScreen`, `exit`; `screenSound` keeps its existing action but exposes the visible and accessible name `朗读` with `开启` / `关闭` metadata, both continuous-reading entries reflect one shared session, and the active read-screen control exposes `当前模式`.
+- Main and read-screen modes use the same Host, root, and toolbar height. Switching `isReadScreen` must not change push-mode body padding or any configured `offsetSelectors` offset. Read-screen order is exactly the six `REGION_TYPES`, `screenSound`, `continuousReading`, `largeCaption`, `help`, `readScreen`, `exit`; `screenSound` keeps its existing action but exposes the visible and accessible name `朗读` with `开启` / `关闭` metadata, both continuous-reading entries reflect one shared session, both large-caption entries reflect one shared independent toggle, and the active read-screen control exposes `当前模式`.
 - Default control surfaces are transparent over one continuous low-contrast track. Icon wells use `--a11y-control-bg`; every `aria-pressed="true"` control uses the same accent surface, accent icon well, and enlarged accent node; exit always uses the danger surface, icon well, and node. Hover remains a restrained dark lift, speech rate has no persistent yellow/accent border, and only genuine `:focus-visible` receives a non-accent high-contrast outline.
 - Speech rate is one direct action button, not a popup trigger. Click, Enter, or Space advances through `[0.75, 1, 1.25, 1.5]`; an exact preset advances to the next value and `1.5` wraps to `0.75`, while a configured or persisted non-preset value advances to the first strictly greater preset or wraps to `0.75` when none exists. The action keeps focus on the toolbar button, commits and persists the new rate, updates its icon state, visible metadata, and accessible name in the same state pass, and announces exactly `当前语速 X 倍` through the live region and active reading speech. It never toggles `readingEnabled`. No rate dialog, preset buttons, range slider, output node, panel state, or `aria-haspopup` / `aria-expanded` / `aria-controls` popup semantics may exist.
 - `voiceSelection` is an independent action/popup control between speech rate and color scheme. It opens an anchored, non-modal `role="dialog"` inside the toolbar Shadow Root without changing the speech-rate action. The panel exposes default-language selection containing the localized common choices plus every unique normalized language in the full current catalog, an `自动选择（推荐）` option, compatible local voices as one radio group, preview, clear-preference, status/privacy text, and a close action. Escape, the close button, and outside interaction close it; explicit panel dismissal returns focus to the connected voice-selection trigger. Closed-Shadow-Root event retargeting must not treat panel interaction as outside interaction, and catalog/selection refreshes preserve the focused radio when it still exists or move focus to the checked fallback. Forced colors and reduced motion must preserve its structure, focus visibility, and operability.
 - `continuousReading` is an independent action/popup control immediately after `reading`. It opens one anchored, non-modal `role="dialog"` named `连续朗读控制`, exposes `未开始` / `朗读中` / `已暂停`, and provides explicit start, pause/resume, stop, and close controls. Escape, close, and outside interaction dismiss only the panel and never stop playback; explicit dismissal returns focus to the currently connected entry and never traps focus.
-- Continuous start checks `SpeechAdapter.isSupported()` before changing state. Unsupported speech leaves `readingEnabled` and `continuousReadingState` unchanged and emits no continuous start/stop event. A supported but empty scope first persists `readingEnabled=true`, then stays idle with no continuous start/stop event. A valid start automatically enables/persists reading before the continuous playing state; stop, completion, and error never disable reading, while an explicit reading-off action stops playing or paused sessions with reason `disabled`.
-- One reading-layer session owns `idle | playing | paused`, a monotonically invalidated generation, one finite queue, and one current-segment provider. Pause cancels the utterance and preserves the segment; resume revalidates and replays that segment from its beginning. Repeated controls are idempotent. Rate, preferred-language, and local-voice changes leave the current request snapshot intact and apply from the next segment; their confirmations use the live region while a session exists. Voice preview is an explicit takeover and stops the session with reason `interaction`.
+- `largeCaption` is an output toggle independent from `reading`: enabling it never enables audio, disabling audio leaves caption output active, and either the main or read-screen entry updates both entries' `aria-pressed`, metadata, icon state, public state, and persisted preference in one state pass. Caption-only single-target and continuous output remain available when speech synthesis is unsupported. Turning off the last available output stops a text-only continuous session, while turning off audio during a dual-output request transitions the current caption to timed text without replaying it. Defaults and `reset()` are captions off, `36px`, simplified, and pinyin off.
+- The large-caption surface is appended inside the toolbar Shadow Root as a sibling of the toolbar root. It is fixed to the viewport bottom, spans from `left: 0` to `right: 0`, is capped at `32vh`, keeps its controls visible, and scrolls only its text body. The body is an ordinary `tabindex="0"`, `role="region"` named `当前大字幕内容`; neither it nor its ancestors use `aria-live`, `role="status"`, `role="alert"`, or modal/dialog semantics. Pinyin annotations are `aria-hidden="true"`, so assistive technology reads the written text once. The surface stays hidden until an effective `single`, `continuous`, `preview`, or `announcement` output request is eligible for captions; caption-setting confirmations use the toolbar's separate short live status and never replace the current text request.
+- Large-caption controls expose mutually exclusive `简体` / `繁体`, independent `拼音`, and mutually exclusive `28` / `36` / `48` pixel choices. `opencc-js` standard `cn2t` / `t2cn` conversion and tone-marked `pinyin-pro` output are derived from the immutable original text snapshot on every setting change, so switching modes never converts an already converted result. Mixed Chinese/non-Chinese content preserves its source order, and rendering uses DOM text nodes rather than library HTML or `innerHTML`. A converter exception preserves the original text; a pinyin exception or character-alignment mismatch drops only the pinyin presentation. Neither failure emits a public error or interrupts output.
+- The explicit `关闭大字幕` action disables only captions, hides and clears the surface, and restores focus to the currently visible connected `largeCaption` toolbar entry; if that entry cannot receive focus, it falls back to the remembered source and then the document body. Lifecycle, route, reset, output-token replacement, and delayed callbacks clear or invalidate caption work without allowing stale text/timers to overwrite newer output.
+- Continuous start requires at least one available output. Unsupported speech with captions off leaves `readingEnabled` and `continuousReadingState` unchanged and emits no continuous start/stop event; with captions on, the same queue advances as timed text without enabling audio. An empty scope stays idle with no continuous start/stop event. A valid audio-only start automatically enables/persists reading before the continuous playing state; stop, completion, and error never disable reading, while an explicit reading-off action stops a playing/paused session only when captions are also off.
+- One reading-layer session owns `idle | playing | paused`, a monotonically invalidated generation, one finite queue, and one current-segment provider. Pausing an audio-backed segment cancels the utterance and preserves the segment; resume revalidates and replays that segment from its beginning. Pausing a text-only or audio-fallback segment instead freezes its remaining display time; resume continues that remaining timer, with the shared one-second minimum fallback remainder, without rebuilding the queue. Repeated controls are idempotent. Rate, preferred-language, and local-voice changes leave the current request snapshot intact and apply from the next segment; re-enabling audio likewise applies from the next segment rather than restarting the current timed-text segment. Their confirmations use the live region while a session exists. Voice preview is an explicit takeover and stops the session with reason `interaction`.
 - Start position is the last connected, visible, readable, non-sensitive page target retained before toolbar focus, then the first eligible member of the current region, then the first page member. The queue follows finite composed-tree order through ordinary DOM, open Shadow Roots, assigned/fallback slots, and same-origin iframes at each host position. It includes body/div/span bare text and unregioned content, never groups by region type, and never moves keyboard focus during automatic advance.
 - Sequence atomization prevents text-container/descendant, label/control, `aria-labelledby`, `aria-describedby`, current-option, and tab/panel duplication. Valid visible tabs are atomic and include their live name/state; the visible current panel is traversed by segment, while hidden/inactive panels are excluded and never auto-activated. Editable text controls expose label/type/placeholder/description and non-text state but never their current value. Password, `autocomplete="one-time-code"`, every case-insensitive section-token `cc-*` field, captcha/security-keyboard markers, configured ignore selectors, sensitive nodes, and any ignored/sensitive label, reference, option, or descendant text source are excluded.
 - Queue membership freezes at start, but every member resolves its current parent, assigned/fallback slot, composed privacy/visibility boundary, accessible text, language, rate, and voice immediately before use. Ordinary new nodes wait for the next session. Removed, hidden, ignored, sensitive, empty, moved-across-invalid-boundary, or hidden-panel members skip without public segment events. A current invalid member cancels immediately and advances; if an atomic member loses only a newly sensitive/ignored text source, cancel and replay the sanitized same member. Ordinary current text/language/settings changes do not restart the committed utterance snapshot.
 - User page focus/click, tab activation, region navigation, another explicit page speech request, or preview stops playing/paused sessions with reason `interaction`. A new or replaced modal stops with `dialog`; explicit restart inside the innermost active modal uses `scope="dialog"` and never escapes to the background. `pushState`, `replaceState`, `popstate`, `hashchange`, and `accessibility-tool:route` stop with `route`. Close/reset/destroy/runtime teardown stop with `lifecycle`, invalidate generation before cancellation, clear queue/current segment/highlight/observers, and never auto-resume.
-- Continuous events expose only state, scope, frozen-queue position/count, text length, and stop reason. Valid first-start order is optional reading `statechange` → playing `statechange` → `continuousreadingstart` → first `continuousreadingsegmentchange` → `speechstart`. Advance order is `speechend` → next segmentchange → next speechstart. Valid error order is one `error` → idle `statechange` → reason=`error` stop. Canceled or stale callbacks emit no public speech/end/error/session event and cannot advance a newer generation. Completion clears the current provider/highlight, leaves focus unchanged, and uses a non-synthesized `连续朗读已完成` status.
-- Every segment continues through the single `SpeechController -> SpeechAdapter` path. A synchronous adapter `speak()` exception is converted into the same one effective error path; a synchronous adapter `cancel()` exception is contained so pause/stop/lifecycle cleanup still reaches stable state. The queue/current text is never persisted, logged, or uploaded, and v0.2 makes no runtime network request or cloud-TTS call.
+- Continuous events expose only state, scope, frozen-queue position/count, text length, and stop reason. Valid audio first-start order is optional reading `statechange` → playing `statechange` → `continuousreadingstart` → first `continuousreadingsegmentchange` → `speechstart`. Audio advance order is `speechend` → next segmentchange → next speechstart. When no caption fallback exists, valid audio failure order is one `error` → idle `statechange` → reason=`error` stop. With captions enabled, a pre-start or mid-stream audio failure instead emits exactly one public `error`, emits no forged `speechstart` / `speechend`, keeps the continuous session playing, and completes that segment through timed text before advancing. Canceled or stale callbacks emit no public speech/end/error/session event and cannot advance a newer generation. Completion clears the current provider/highlight, leaves focus unchanged, and uses a non-synthesized `连续朗读已完成` status.
+- Every request continues through one output coordinator. Audio uses the existing `SpeechController -> SpeechAdapter` path and reveals its caption only after the matching audio `onStart`; enabling captions during pending audio does not reveal text early, while a valid playing, paused, or retained token may be shown immediately. Caption-only or pre-start failed-audio fallback uses deterministic timed text with duration clamped to 3–15 seconds and a 3-second final `已结束` retention. A mid-stream error subtracts elapsed audio time and uses at least one second of remaining timed text. Tokens invalidate old speech callbacks, display timers, and retention timers. A synchronous adapter `speak()` exception becomes exactly one public error and either the same timed-text fallback or the no-fallback error stop; a synchronous adapter `cancel()` exception is contained so pause/stop/lifecycle cleanup still reaches stable state. Automatic end/hide, route, and lifecycle cleanup never move focus; only the explicit close control restores focus. The queue/current text is never persisted, logged, or uploaded, and v0.2 makes no runtime network request or cloud-TTS call.
 - The browser-local catalog reads `speechSynthesis.getVoices()`, starts in `loading` when the first list is empty, and refreshes on `voiceschanged`. It exposes only entries whose native `localService` is exactly `true`, normalizes language tags, deduplicates stable descriptors, and orders exact-language matches before same-primary-language matches, then defaults and stable names. The UI never retains native voice objects. Every effective speech or preview request resolves again from the latest native list, first by compatible `voiceURI`, then by `name + normalized lang`; if neither matches, use a compatible native default when present, otherwise leave `utterance.voice` unset for the browser fallback.
 - The catalog/capability seam is internal and source-neutral: consumers depend on `providerId`, `localOnly`, and `supportsPreview`, not browser or vendor fields. v0.2 registers only the `browser-local` provider and the existing browser adapter. This seam is not exported, creates no third-party plugin contract, reads no credentials, includes no cloud SDK or provider voice IDs, and performs no network request; a later approved phase may add another internal provider without changing the v0.2 local behavior.
 - Voice catalog listeners exist only while the runtime is open and are removed on close/destroy. Preview owns only its current speech request: repeating preview cancels the previous preview, while a stale preview completion/cancel callback cannot cancel or complete a newer page-reading request. Closing, resetting, or destroying clears queued preview work and stale callbacks; custom speech adapters keep their existing behavior and receive a clear unavailable explanation instead of browser-local voice controls.
@@ -312,9 +401,17 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 
 | Condition | Required behavior |
 | --- | --- |
-| Unsupported speech synthesis | Keep reading/rate controls focusable, set `aria-disabled="true"`, announce the reason, and do not enable reading. |
-| Continuous start with unsupported speech | Keep the session idle, do not enable reading, emit no continuous start/stop event, and explain the unavailable capability only through the live region. |
-| Continuous start with no eligible member | Preserve the start action's persisted `readingEnabled=true`, keep the session idle, emit no continuous start/stop event, leave focus unchanged, and announce `当前范围没有可朗读内容`. |
+| Unsupported speech synthesis | Keep the audio-reading controls focusable with `aria-disabled="true"` and never enable audio. If captions are off, speech rate and continuous start are also unavailable; if captions are on, speech rate remains operable for timed text and continuous start remains available without enabling audio. |
+| Continuous start with unsupported speech and captions off | Keep the session idle, do not enable reading, emit no continuous start/stop event, and explain the unavailable capability only through the live region. |
+| Continuous start with unsupported speech and captions on | Start the ordinary finite queue as timed text, keep `readingEnabled=false`, emit continuous start/segment events but no `speechstart` / `speechend`, and advance each member after its 3–15 second display duration. |
+| Continuous start with no eligible member | Keep the session idle, emit no continuous start/stop event, leave focus unchanged, and announce `当前范围没有可朗读内容`. Preserve `readingEnabled=true` only when this start action first enabled audio; a caption-only attempt must not change an existing `readingEnabled=false`. |
+| Audio fails before `onStart` while captions are enabled | Emit one public `error`, show the same immutable text as `显示中`, emit no `speechstart` / `speechend`, and let the timed-text segment end/advance normally. |
+| Audio fails after `onStart` while captions are enabled | Emit one public `error`, keep the existing text, change `朗读中` to `显示中`, emit no `speechend`, and continue for estimated duration minus elapsed audio with at least one second remaining. |
+| Caption is enabled during pending, playing, paused, retained, canceled, or expired output | Pending audio stays hidden until `onStart`; valid playing, paused, or retained tokens appear immediately with their current status; canceled, error-stopped, and expired tokens never reappear. |
+| Caption is disabled during audio, timed text, or retained output | Hide and clear immediately. Audio continues; a text-only single output cancels its timer; an all-text continuous session stops explicitly; a retained review window is destroyed so re-enabling cannot resurrect it. |
+| Caption output receives an old speech callback, display timer, or retention timer | Ignore it by token/generation. It cannot clear, replace, settle, or advance the current request. |
+| `opencc-js` conversion throws, or pinyin generation throws/cannot align with display characters | Preserve the original written text; omit only the invalid pinyin presentation; do not emit a public error, alter speech input, or stop the session. |
+| One optional saved caption field is malformed | Ignore only that field and apply its default (`false`, `36`, `simplified`, or `false`); preserve valid sibling and v0.1 preferences and omit the invalid value on the next save. |
 | Current continuous member becomes disconnected, hidden, ignored, sensitive, payment/OTP/password, empty, or moves behind an invalid slot/frame/host boundary | Invalidate/cancel the active utterance without `speechend` or `error`, clear its current provider/highlight, and continue from the next valid frozen member. |
 | A current atomic member's label, description, option, or descendant becomes ignored/sensitive while other safe text remains | Cancel the old snapshot immediately and replay the sanitized same queue member; ordinary text changes that do not introduce a privacy boundary finish the committed utterance. |
 | A label, `aria-labelledby`, `aria-describedby`, native label, active/selected option, or text fallback source is ignored/sensitive | Exclude that source before formatting. Preserve other safe sources or fall back to the control type; never concatenate the protected text through its owner. |
@@ -347,7 +444,7 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 | Automatic restoration races with explicit open/close | Serialize the pending open. Explicit open retains trigger/focus/announcement semantics; close waits for the pending restoration, then closes and clears intent. |
 | `localStorage` is unavailable | Continue with in-page memory and no exception. Cross-refresh restoration is unavailable by design. |
 | Stale speech callback after interruption | Ignore it; do not emit a false `error` or `speechend` for the canceled request. |
-| Custom `SpeechAdapter.speak()` throws synchronously | Convert it into one effective public `error`, then continuous idle `statechange` and reason=`error` stop; ignore any callback retained by the throwing adapter. |
+| Custom `SpeechAdapter.speak()` throws synchronously | Emit one effective public `error` and ignore any callback retained by the throwing adapter. With captions enabled, continue through timed text without a stop; without caption fallback, emit continuous idle `statechange` and reason=`error` stop. |
 | Custom `SpeechAdapter.cancel()` throws synchronously | Contain the exception after invalidating the request so pause, stop, route, and lifecycle cleanup continue to their requested stable state. |
 | Initial voice list is empty | Keep the voice settings usable and marked loading; refresh from the same catalog when `voiceschanged` arrives. |
 | Voice list contains only remote, malformed, or language-incompatible entries | Expose no selectable local voice, keep automatic selection available, and leave `utterance.voice` unset. |
@@ -374,6 +471,9 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 - Good (voice): an initially empty browser catalog remains loading, then a `voiceschanged` refresh exposes every compatible local language and voice. The UI persists only a descriptor, while the separate native resolver obtains the latest matching `SpeechSynthesisVoice` for each request and preserves panel/radio focus through refreshes.
 - Base (voice): no compatible local voice, a missing saved descriptor, or a custom adapter leaves `utterance.voice` unset and keeps the existing speech path usable with an explicit status explanation.
 - Bad (voice): caching a native voice, exposing a remote entry, typing runtime consumers to `BrowserLocalVoiceCatalog`, relying only on a document-level outside-click listener for a closed Shadow Root, or replacing a focused radio list without deterministic focus restoration is forbidden.
+- Good (caption): the host loads one IIFE offline, starts a caption-only continuous session when speech is unavailable, and exposes the current text through one named, focusable, non-live region. Simplified, traditional, and tone-marked pinyin presentations are regenerated from one immutable source snapshot, while an older output token cannot hide or overwrite a newer segment.
+- Base (caption): captions may be enabled while no effective text exists; both toolbar entries remain pressed but the bottom surface is absent. Non-Chinese content remains unchanged, missing v0.1 caption fields use `false / 36 / simplified / false`, and conversion failure preserves ordinary written text.
+- Bad (caption): announcing the full caption through `aria-live` / `role="status"`, rendering library HTML with `innerHTML`, persisting page text, chaining conversions from already converted text, coupling the caption toggle to audio, or loading a CDN, dynamic import, language chunk, or runtime dictionary is forbidden.
 
 ### 6. Tests Required
 
@@ -386,13 +486,16 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 - Unit: every visible recognized region receives a reversible Tab anchor; shortcut and ordinary/reverse/programmatic container focus announce the same instruction once; listener-order-independent reading coordination skips the container but reads descendants; reading overlay, active-region owner, and current-focus owner remain independent; region focus is yellow, descendant focus restores the region to orange, host box shadows stay suppressed while owned, and all values/priorities restore exactly.
 - Unit: exact tab/link/no-region speech templates; every-focus announcements without selection states; scanned category lookup across ordinary DOM, open Shadow Roots, and same-origin iframe documents; listener-order-independent generic-reading suppression; per-option automatic/manual activation; trigger-event fallback/deduplication; shared/timeout-safe host activation for hidden panel regions; stale region-navigation suppression; host-owned `data-a11y-hidden` panels without native `hidden`; focusable/static panel entry using the panel's own category; host-driven intermediate focus during entry/exit; normal descendant reading after entry; concurrent-operation deduplication; successful and failed Escape return; and non-modal dialog focus behavior.
 - Unit: public tab registration covers the flat signature, selector multi-match DOM-order pairing, count-mismatch isolation, direct-parent tablist inference and cross-parent splitting, conflicting-pair isolation, generated/reused IDs, per-tab behavior attributes, shared tab/panel region/name metadata, `data-a11y-hidden` without native `hidden` mutation, layered overlapping disposal, and destroy cleanup.
+- Unit: caption presentation covers standard `cn2t` / `t2cn`, mixed Chinese/Latin/numeric/punctuation order, tone-marked pinyin, immutable-source round trips, safe text-node rendering, hidden phonetic annotations, and converter/pinyin/alignment failure fallbacks.
+- Unit: the output coordinator covers pending/audio/text/paused/retained phases, 3–15 second estimation, the one-second mid-stream fallback minimum, three-second retention, caption enablement during playing/paused/retained, disablement during audio/text/retained, audio-to-text transition, pause/resume remaining time, and stale speech/display/retention tokens.
+- Unit: default, stored, corrupt, reset, close, route, destroy, and legacy-v0.1 caption preferences keep settings separate from runtime text; main/read-screen entries stay synchronized and only explicit caption close invokes the documented focus fallback.
 - Unit: interrupted speech must not emit stale errors.
-- Unit: synchronous adapter `speak()` throw emits one error and leaves continuous reading idle with reason `error`; late callbacks remain inert. A throwing `cancel()` cannot block pause, stop, or `onCancel` cleanup.
+- Unit: synchronous adapter `speak()` throw emits one error; with captions it completes the current segment as timed text, and without captions it leaves continuous reading idle with reason `error`. Late callbacks remain inert. A throwing `cancel()` cannot block pause, stop, or `onCancel` cleanup.
 - Unit: continuous sequence covers body/div/span bare text, open Shadow Roots, assigned and fallback slot text, same-origin iframes, live slot reassignment, current Text-node parent changes, and composed privacy/visibility boundaries without duplication.
 - Unit: continuous privacy covers editable-value omission, password, captcha/security markers, case-insensitive section-token `cc-*`, `one-time-code`, arbitrary configured attribute/ID selectors, accessible-name/description/native-label/current-option sources, and sensitive/ignored descendants of text blocks and atomic controls.
 - Unit: current privacy mutations cancel immediately while ordinary current text changes finish their snapshot; deleted/hidden/empty members skip, frozen indices may jump, and ordinary newly inserted nodes do not enter the active queue.
 - Unit: valid tabs remain atomic while the visible linked panel is traversed by segment; hidden panels never enter the sequence or receive an activation request.
-- Unit: continuous start fallback, page/dialog scopes, idempotent start/pause/resume/stop, reading-toggle integration, setting changes, interaction/dialog/route/lifecycle reasons, current-segment provider, and exact event payload/order are deterministic.
+- Unit: continuous start fallback, page/dialog scopes, idempotent start/pause/resume/stop, audio replay versus timed-text remaining-time resume, reading-toggle integration, next-segment audio restoration, setting changes, interaction/dialog/route/lifecycle reasons, current-segment provider, and exact event payload/order are deterministic.
 - Unit: browser-local voice catalog covers initial empty/synchronous lists, `voiceschanged`, local-only filtering, malformed/duplicate entries, exact and primary-language ordering, current-object re-resolution, capability snapshots, subscriber cleanup, `voiceURI` then `name + lang` recovery, compatible-default fallback, and no-match browser fallback.
 - Unit: browser speech forwards only a freshly resolved local native voice; remote or stale matches remain unset. Repeated preview, close, reset, destroy, and current-request cancellation never let an older callback cancel or complete newer reading.
 - Unit: language-tag normalization covers casing, underscores, script/region subtags, unavailable/malformed values, and `Intl` absence. Resolution covers all six priority levels, invalid-candidate fallthrough, open Shadow Root host ancestry, owner-document isolation, dynamic DOM/config/preference changes, and safe final fallback. Text detection covers Chinese, Latin, Japanese kana plus Han, Hangul, two-character/60% thresholds, semantic prefixes, URLs/domains/email preprocessing, Han-only ambiguity, and unknown/ignored content.
@@ -401,7 +504,7 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 - Unit: current-region notifications set one `aria-current="location"` control, render `index + 1/count`, follow click/shortcut/page-focus navigation, refresh without extra public events, and clear on invalidation, toolbar return, close, and navigation reset.
 - Unit: all switch icons follow their final pressed state, reading and read-screen sound share identical artwork, all five palettes are distinct, the rate indicator changes with its current value, direct rate activation covers the complete preset wrap plus non-preset values with no dialog semantics, voice selection remains a separate popup action between rate and color, closed-Shadow-Root pointer retargeting keeps panel interaction open while real outside interaction closes it, voice-list refresh preserves the same focused radio or the checked fallback, and zoom artwork stays fixed while its metadata changes; all SVG accessibility attributes remain intact.
 - E2E: lazy open, fixed order, roving toolbar keyboard model, immediate pinned pointer-leave collapse with scroll-stable reveal-focus transfer in both main and read-screen modes, delayed keyboard focusout collapse, reveal/top-edge/shortcut expansion, persisted pinned + read-screen restoration, and collapse/expand visibility timing in normal and reduced-motion modes, plus zoom isolation, reset, and Fullscreen API.
-- E2E: at 2048px, 1440px, and 1280px all 15 main controls stay on one row; the outer toolbar remains viewport-wide while the shared brand/control/track frame is exactly capped at 1280px, horizontally centered, and fully contains both the brand rail and exit control. At 1200px and 1024px the frame fills the available width, controls stay on one compact row, and keyboard navigation can still reach and invoke exit. Main/read-screen Host, root, toolbar, frame, body padding, and configured offset values remain equal across mode switches.
+- E2E: at 2048px, 1440px, and 1280px all 16 main controls stay on one row; the outer toolbar remains viewport-wide while the shared brand/control/track frame is exactly capped at 1280px, horizontally centered, and fully contains both the brand rail and exit control. At 1200px and 1024px the frame fills the available width, controls stay on one compact row, and keyboard navigation can still reach and invoke exit. Main/read-screen Host, root, toolbar, frame, body padding, and configured offset values remain equal across mode switches.
 - E2E: default surfaces are transparent, active reading and pinning share the same accent treatment, exit uses danger treatment, speech rate has no persistent accent border, and keyboard-driven `:focus-visible` is high contrast and not the accent color.
 - E2E: a current read-screen region and concurrently active binary main controls show the accent-filled node, background gap, accent outer ring, and center-expanding local segment; value/action controls and exit remain isolated, and reduced-motion removes the transitions.
 - E2E: click, Enter, and Space directly cycle speech rate through the full preset wrap from exact and non-preset values without creating a dialog; state, persistence, icon, metadata, accessible name, live/synthesized announcement, focus, and pinned collapse remain synchronized. Switch and palette icon states stay synchronized through user actions, reset, persisted restoration, and browser-driven fullscreen exit; zoom percentages update without changing the fixed magnifier artwork; both crosshair axes use the default or configured danger color as pure `3px` lines with no border, outline, or shadow and do not accept pointer events.
@@ -414,7 +517,11 @@ DEFAULT_CONFIG < configure(siteConfig) < open({ config: sessionConfig })
 - E2E: Tab, Shift+Tab, arrow, script, Alt+ArrowDown, and Escape produce the exact single tab/panel/return live message; static panels gain no descendant tab stops; ordinary DOM, open Shadow Roots, and same-origin iframe tabs use their scanned region category.
 - E2E: public registrations made before and after open immediately enter native region navigation; selector multi-match and Element targets restore through their own handles. Dynamically registered paired tabs use the existing Tab/Shift+Tab, original-event, Alt+Down, Escape, and hidden-panel region-shortcut pipeline exactly once, while overlapping handles preserve generated IDs and region counts until the final disposal.
 - E2E: a deterministic custom speech adapter captures the final normalized `lang` for target, ancestor, document, saved-preference, local text, and project-default sources. Chrome and Edge cover dynamic `lang` removal, open Shadow Root host inheritance, same-origin iframe owner-document language, and ambiguous-text fallback without depending on installed operating-system voices.
-- E2E: deterministic browser speech fixtures cover initial empty voices plus `voiceschanged`, local-only filtering, language changes, automatic/local selection, persisted restoration, actual `utterance.voice`, preview replacement, missing saved voices, custom-adapter unavailability, and listener cleanup. Chrome and Edge verify the 15-control order plus continuous/voice-panel keyboard entry, Escape/close/outside dismissal, focus return, forced-colors/reduced-motion behavior, and the absence of tool-originated remote speech requests or vendor configuration.
+- E2E: deterministic browser speech fixtures cover initial empty voices plus `voiceschanged`, local-only filtering, language changes, automatic/local selection, persisted restoration, actual `utterance.voice`, preview replacement, missing saved voices, custom-adapter unavailability, and listener cleanup. Chrome and Edge verify the 16-control order plus continuous/voice-panel keyboard entry, Escape/close/outside dismissal, focus return, forced-colors/reduced-motion behavior, and the absence of tool-originated remote speech requests or vendor configuration.
+- Unit: large-caption runtime and output-coordinator coverage owns text-only continuous start/pause/resume/stop, pre-start and mid-stream audio failure fallback without forged speech events, and stale speech/display/retention token suppression.
+- E2E: Chrome and Edge cover both toolbar entries, audio-independent single-text output, hidden-until-effective behavior, viewport-bottom non-live presentation, simplified/traditional conversion, tone-marked pinyin, 48px sizing, synchronized state and persistence, explicit-close focus return, reload/navigation restoration without stored body text, production-bundle request capture, and long-text reflow at a 640px narrow fixture with forced-colors emulation. The suite does not treat that narrow fixture as a supported mobile/tablet production layout.
+- Manual release checklist: route/lifecycle cleanup, real screen readers and platform fonts, all five palettes, system forced colors, 200% browser zoom, and preservation across large-interface/Fullscreen changes remain explicit human verification items.
+- Build plus release-artifact inspection: the default IIFE contains `opencc-js` and `pinyin-pro`, has no dynamic language import or language/data JavaScript chunk, works without the optional CSS file, and remains within the recorded raw/gzip budget.
 - E2E: Chrome and Edge run one continuous session across main/read-screen modes, verify focus preservation, pause replay, editable/reference privacy, generic and dynamic content, route/modal/disabled/lifecycle stops, stale-callback suppression, shared metadata, and zero tool-originated network requests.
 - E2E: open Shadow Roots, same-origin iframes, strict CSP, scroll/resize, and forced-colors preserve direct-node outline ownership without focus/region geometry overlays.
 - E2E: hostile CSS isolation, strict CSP external styles, closed production Shadow Root, semantic-off configuration, and no new serious/critical axe violations.
@@ -490,6 +597,16 @@ const cachedVoice = speechSynthesis.getVoices()[0];
 document.addEventListener("pointerdown", (event) => {
   if (!event.composedPath().includes(voicePanel)) closeVoicePanel();
 });
+
+// Duplicates spoken content for screen readers, trusts generated markup, and
+// creates a runtime language chunk/network dependency.
+caption.setAttribute("aria-live", "polite");
+caption.innerHTML = renderPinyinHtml(convertCaption(caption.innerHTML));
+const converter = await import("opencc-js");
+
+// Bypasses the shared output token, so an old timer can erase newer text.
+speech.speak(text, lang, rate);
+window.setTimeout(() => caption.replaceChildren(), 3_000);
 ```
 
 #### Correct
@@ -612,4 +729,21 @@ const nativeVoice = nativeVoiceResolver.resolveNativeVoice(
   language,
 );
 owningShadowRoot.addEventListener("pointerdown", classifyVoicePanelPointer, true);
+
+// Language dependencies are static IIFE inputs. Every output owns one token,
+// and the caption sink renders ordinary text without live-region semantics.
+import { ConverterBuilder } from "opencc-js/core";
+import * as cn2t from "opencc-js/preset/cn2t";
+import * as t2cn from "opencc-js/preset/t2cn";
+import { pinyin } from "pinyin-pro";
+
+const cancelOutput = output.speak(originalText, language, rate, {
+  kind: "continuous",
+  onEnd: advanceContinuousQueue,
+  onError: stopOnlyWhenNoCaptionFallback,
+});
+captionBody.setAttribute("role", "region");
+captionBody.setAttribute("aria-label", "当前大字幕内容");
+captionBody.tabIndex = 0;
+captionText.replaceChildren(document.createTextNode(derivedWrittenText));
 ```

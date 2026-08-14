@@ -25,7 +25,7 @@ import {
 } from "./continuous-reading";
 import { resolveSpeechLanguage } from "./language";
 import type { PageEffectsController } from "./page-effects";
-import type { SpeechController } from "./speech";
+import type { OutputRequestOptions } from "./output";
 
 type ReadingRoot = ContinuousReadingRoot;
 
@@ -40,6 +40,20 @@ interface ReadingTargetProvider {
   isTabSpeechTarget: (element: HTMLElement) => boolean;
   isContinuousReadingTab?: (element: HTMLElement) => boolean;
   getCurrentRegionElement?: () => HTMLElement | null;
+}
+
+interface ReadingOutputController {
+  speak(
+    text: string,
+    lang: string,
+    rate: number,
+    options: OutputRequestOptions,
+  ): (() => void) | null;
+  cancel(): void;
+  canOutput?: () => boolean;
+  isSupported?: () => boolean;
+  pauseContinuous?: () => "audio" | "text" | null;
+  resumePausedText?: () => boolean;
 }
 
 interface ContinuousReadingCallbacks {
@@ -99,6 +113,7 @@ export class ReadingController {
   private lastText = "";
   private lastLanguage = "";
   private activeTarget: HTMLElement | null = null;
+  private singleGeneration = 0;
   private running = false;
   private continuousState: ContinuousReadingState = "idle";
   private continuousSequence: readonly ContinuousReadingCandidate[] = [];
@@ -110,7 +125,7 @@ export class ReadingController {
 
   constructor(
     private config: ResolvedAccessibilityToolConfig,
-    private readonly speech: SpeechController,
+    private readonly output: ReadingOutputController,
     private readonly effects: PageEffectsController,
     private readonly state: ReadingStateProvider,
     private readonly targets: ReadingTargetProvider,
@@ -233,7 +248,9 @@ export class ReadingController {
     if (this.continuousState !== "idle") {
       return "started";
     }
-    if (!this.speech.isSupported()) {
+    if (
+      !(this.output.canOutput?.() ?? this.output.isSupported?.() ?? true)
+    ) {
       return "unsupported";
     }
 
@@ -292,12 +309,18 @@ export class ReadingController {
     if (this.continuousState !== "playing" || !this.currentSegment) {
       return;
     }
-    const generation = ++this.continuousGeneration;
+    const outputMode = this.output.pauseContinuous?.() ?? "audio";
+    if (!this.output.pauseContinuous) {
+      this.output.cancel();
+    }
+    const generation =
+      outputMode === "text"
+        ? this.continuousGeneration
+        : ++this.continuousGeneration;
     this.currentSegment = {
       ...this.currentSegment,
       generation,
     };
-    this.speech.cancel();
     this.continuousState = "paused";
     this.continuousCallbacks.onStateChange?.("paused");
     this.continuousCallbacks.onPause?.({
@@ -319,22 +342,33 @@ export class ReadingController {
       this.stopContinuous("dialog");
       return;
     }
-    const generation = this.continuousGeneration + 1;
+    const nextGeneration = this.continuousGeneration + 1;
     const prepared = this.findNextPreparedSegment(
       this.continuousSequence,
       Math.max(this.continuousIndex, 0),
       this.continuousScope,
-      generation,
+      nextGeneration,
     );
     if (!prepared) {
       this.finishContinuous("completed", false);
       return;
     }
 
+    const previousSegment = this.currentSegment;
     const moved = prepared.candidateIndex !== this.continuousIndex;
+    const resumedTextOnly = Boolean(
+      !moved &&
+        previousSegment &&
+        previousSegment.text === prepared.segment.text &&
+        previousSegment.language === prepared.segment.language &&
+        this.output.resumePausedText?.(),
+    );
+    const generation = resumedTextOnly
+      ? this.continuousGeneration
+      : nextGeneration;
     this.continuousGeneration = generation;
     this.continuousIndex = prepared.candidateIndex;
-    this.currentSegment = prepared.segment;
+    this.currentSegment = { ...prepared.segment, generation };
     this.continuousState = "playing";
     this.effects.setHighlight(prepared.segment.element);
     this.scrollIntoViewIfNeeded(prepared.segment.element);
@@ -349,7 +383,9 @@ export class ReadingController {
         ...this.toPosition(prepared.segment),
       });
     }
-    this.speakCurrentSegment(generation);
+    if (!resumedTextOnly) {
+      this.speakCurrentSegment(generation);
+    }
   }
 
   stopContinuous(reason: ContinuousReadingStopReason = "stopped"): void {
@@ -389,13 +425,13 @@ export class ReadingController {
         return;
       }
       const generation = this.continuousGeneration;
-      this.speech.cancel();
+      this.output.cancel();
       this.clearCurrentSegment();
       this.advanceContinuous(generation, this.continuousIndex);
       return;
     }
     const generation = this.continuousGeneration;
-    this.speech.cancel();
+    this.output.cancel();
     this.clearCurrentSegment();
     this.advanceContinuous(generation, this.continuousIndex + 1);
   }
@@ -447,15 +483,21 @@ export class ReadingController {
       return;
     }
 
+    const generation = ++this.singleGeneration;
     this.lastTarget = element;
     this.lastText = text;
     this.lastLanguage = language;
     this.activeTarget = element;
     this.effects.setHighlight(element);
-    this.speech.speak(text, language, this.state.getRate(), {
-      onEnd: () => this.finishElement(element),
-      onError: () => this.finishElement(element),
+    const request = this.output.speak(text, language, this.state.getRate(), {
+      kind: "single",
+      onEnd: () => this.finishElement(element, generation),
+      onError: () => this.finishElement(element, generation),
+      onCancel: () => this.finishElement(element, generation),
     });
+    if (!request) {
+      this.finishElement(element, generation);
+    }
   }
 
   private attach(): void {
@@ -499,7 +541,7 @@ export class ReadingController {
   };
 
   private readonly handlePointerOver = (event: Event): void => {
-    if (!this.state.isEnabled()) {
+    if (!this.state.isEnabled() || this.continuousState !== "idle") {
       return;
     }
     const target = this.getReadableTarget(event);
@@ -509,7 +551,7 @@ export class ReadingController {
     this.clearHover();
     this.hoverTarget = target;
     this.hoverTimer = window.setTimeout(() => {
-      if (this.hoverTarget === target) {
+      if (this.hoverTarget === target && this.continuousState === "idle") {
         this.speakElement(target);
       }
     }, this.config.speech.hoverDelayMs);
@@ -569,8 +611,11 @@ export class ReadingController {
     this.hoverTarget = null;
   }
 
-  private finishElement(element: HTMLElement): void {
-    if (this.activeTarget === element) {
+  private finishElement(element: HTMLElement, generation: number): void {
+    if (
+      generation === this.singleGeneration &&
+      this.activeTarget === element
+    ) {
       this.effects.clearHighlight(element);
       this.activeTarget = null;
     }
@@ -578,7 +623,8 @@ export class ReadingController {
 
   private cancelSingleReading(): void {
     this.clearHover();
-    this.speech.cancel();
+    this.singleGeneration += 1;
+    this.output.cancel();
     this.lastTarget = null;
     this.lastText = "";
     this.lastLanguage = "";
@@ -677,11 +723,12 @@ export class ReadingController {
     ) {
       return;
     }
-    const request = this.speech.speak(
+    const request = this.output.speak(
       segment.text,
       segment.language,
       this.state.getRate(),
       {
+        kind: "continuous",
         onEnd: () => this.handleContinuousEnd(generation, segment.index - 1),
         onError: () => this.handleContinuousError(generation),
       },
@@ -758,7 +805,7 @@ export class ReadingController {
       this.clearContinuousStartContext();
     }
     if (cancelSpeech) {
-      this.speech.cancel();
+      this.output.cancel();
     }
     this.disconnectSessionObservers();
     this.clearCurrentSegment();

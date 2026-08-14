@@ -69,6 +69,7 @@ export class SpeechController {
     lang: string,
     rate: number,
     callbacks: {
+      onStart?: () => void;
       onEnd?: () => void;
       onError?: () => void;
       onCancel?: () => void;
@@ -103,6 +104,7 @@ export class SpeechController {
           if (requestId === this.requestId && !started && !settled) {
             started = true;
             this.emitter.emit("speechstart", { textLength: text.length });
+            callbacks.onStart?.();
           }
         },
         onEnd: () => {
@@ -112,7 +114,9 @@ export class SpeechController {
           settled = true;
           this.requestId = requestId + 1;
           this.activeOnCancel = null;
-          this.emitter.emit("speechend", undefined);
+          if (started) {
+            this.emitter.emit("speechend", undefined);
+          }
           callbacks.onEnd?.();
         },
         onError: settleError,

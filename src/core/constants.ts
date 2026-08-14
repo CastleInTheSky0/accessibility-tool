@@ -74,6 +74,7 @@ export const MAIN_FEATURE_ORDER: readonly FeatureId[] = [
   "largeCursor",
   "crosshair",
   "fullscreen",
+  "largeCaption",
   "pin",
   "reset",
   "help",

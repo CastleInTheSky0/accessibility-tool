@@ -57,6 +57,42 @@ describe("PreferenceStore", () => {
     expect(new PreferenceStore(key, 1).load()).toEqual(preferences);
   });
 
+  it("round-trips caption preferences while keeping v0.1 payloads valid", () => {
+    const captionPreferences: PersistedPreferences = {
+      ...preferences,
+      captionEnabled: true,
+      captionFontSize: 48,
+      captionScript: "traditional",
+      captionPinyinEnabled: true,
+    };
+    const store = new PreferenceStore("test:caption-preferences", 1);
+    store.save(captionPreferences);
+
+    expect(store.load()).toEqual(captionPreferences);
+    expect(localStorage.getItem("test:caption-preferences")).not.toContain(
+      "字幕正文",
+    );
+  });
+
+  it("ignores invalid caption siblings instead of rejecting the payload", () => {
+    const key = "test:invalid-caption-preferences";
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        version: 1,
+        preferences: {
+          ...preferences,
+          captionEnabled: "yes",
+          captionFontSize: 99,
+          captionScript: "taiwan",
+          captionPinyinEnabled: 1,
+        },
+      }),
+    );
+
+    expect(new PreferenceStore(key, 1).load()).toEqual(preferences);
+  });
+
   it("round-trips a serializable voice descriptor", () => {
     const voicePreferences: PersistedPreferences = {
       ...preferences,

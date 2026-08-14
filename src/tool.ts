@@ -20,6 +20,7 @@ import {
 import { DomRegistrationController } from "./features/dom-registration";
 import { PageEffectsController } from "./features/page-effects";
 import { normalizeLanguageTag } from "./features/language";
+import { OutputCoordinator } from "./features/output";
 import { ReadingController } from "./features/reading";
 import { RegionNavigationController } from "./features/region-navigation";
 import { RegionScanner } from "./features/regions";
@@ -43,6 +44,8 @@ import type {
   AccessibilityToolEventMap,
   AccessibilityToolOpenOptions,
   AccessibilityToolState,
+  CaptionFontSize,
+  CaptionScript,
   PersistedPreferences,
   PersistedVoicePreference,
   RegionRegistrationConfig,
@@ -87,6 +90,7 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
   private styles: StyleManager | null = null;
   private ui: ToolbarUI | null = null;
   private speech: SpeechController | null = null;
+  private output: OutputCoordinator | null = null;
   private voiceCatalog: VoiceCatalogProvider | null = null;
   private nativeVoiceResolver: BrowserNativeVoiceResolver | null = null;
   private runtimeSpeechAdapterMode: "browser-local" | "custom-adapter" | null =
@@ -130,8 +134,9 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
     if (
       this.state.isOpen &&
       this.state.continuousReadingState !== "idle" &&
-      (!nextConfig.features.reading ||
-        !nextConfig.features.continuousReading)
+      (!nextConfig.features.continuousReading ||
+        (!nextConfig.features.reading &&
+          !nextConfig.features.largeCaption))
     ) {
       this.reading?.stopContinuous("disabled");
     }
@@ -354,7 +359,7 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
 
     this.reading?.stopContinuous("lifecycle");
     this.reading?.clearContinuousStartContext();
-    this.speech?.cancel();
+    this.output?.cancel();
     this.reading?.cancel();
     this.suppressFullscreenAnnouncement = true;
     await this.effects?.exitFullscreen();
@@ -548,6 +553,11 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
       onContinuousReadingResume: () => this.reading?.resumeContinuous(),
       onContinuousReadingStop: () =>
         this.reading?.stopContinuous("stopped"),
+      onCaptionClose: () => this.setCaptionEnabled(false),
+      onCaptionFontSizeChange: (size) => this.setCaptionFontSize(size),
+      onCaptionScriptChange: (script) => this.setCaptionScript(script),
+      onCaptionPinyinChange: (enabled) =>
+        this.setCaptionPinyinEnabled(enabled),
     });
     const configuredSpeechAdapter = this.activeConfig.speech.adapter;
     this.runtimeSpeechAdapterMode = configuredSpeechAdapter
@@ -571,16 +581,22 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
         ),
       this.emitter,
     );
+    this.output = new OutputCoordinator(this.speech, this.ui, {
+      isAudioEnabled: () => this.state.isOpen && this.state.readingEnabled,
+      isCaptionEnabled: () => this.state.isOpen && this.state.captionEnabled,
+    });
     this.effects = new PageEffectsController(this.activeConfig, this.ui, {
       onFullscreenChange: (fullscreen) => this.handleFullscreenChange(fullscreen),
       onError: (error, message) => this.reportError(error, message),
     });
     this.reading = new ReadingController(
       this.activeConfig,
-      this.speech,
+      this.output,
       this.effects,
       {
-        isEnabled: () => this.state.isOpen && this.state.readingEnabled,
+        isEnabled: () =>
+          this.state.isOpen &&
+          (this.state.readingEnabled || this.state.captionEnabled),
         getRate: () => this.state.speechRate,
         getPreferredLanguage: () => this.preferredLanguage,
       },
@@ -692,7 +708,7 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
       onRouteChange: () => {
         this.reading?.stopContinuous("route");
         this.reading?.clearContinuousStartContext();
-        this.speech?.cancel();
+        this.output?.cancel();
         this.reading?.cancel();
         this.regionNavigation?.resetPositions();
       },
@@ -711,6 +727,7 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
     this.tabs?.stop();
     this.regionNavigation?.stop();
     this.reading?.stop();
+    this.output?.cancel();
     this.effects?.destroy();
     this.ui?.destroy();
     this.styles?.destroy();
@@ -722,6 +739,7 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
     this.styles = null;
     this.ui = null;
     this.speech = null;
+    this.output = null;
     this.voiceCatalog = null;
     this.nativeVoiceResolver = null;
     this.runtimeSpeechAdapterMode = null;
@@ -754,7 +772,7 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
     this.savePreferences();
     this.voiceCatalog?.stop();
     this.reading?.stop();
-    this.speech?.cancel();
+    this.output?.cancel();
     this.scanner?.stop();
     this.tabs?.stop();
     this.tabsStarted = false;
@@ -836,6 +854,9 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
           this.announce("无法进入全屏，请检查浏览器权限", false);
         }
         break;
+      case "largeCaption":
+        this.setCaptionEnabled(!this.state.captionEnabled);
+        break;
       case "pin":
         this.commitState({
           isPinned: !this.state.isPinned,
@@ -866,11 +887,57 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
       this.announce("当前浏览器不支持语音合成", false);
       return;
     }
-    if (!enabled) {
+    if (!enabled && !this.state.captionEnabled) {
       this.reading?.stopContinuous("disabled");
+      this.reading?.cancel();
     }
     this.commitState({ readingEnabled: enabled });
-    this.announce(`朗读已${enabled ? "开启" : "关闭"}`, enabled);
+    if (!enabled && this.state.captionEnabled) {
+      this.output?.transitionAudioToText();
+    }
+    this.announce(
+      `朗读已${enabled ? "开启" : "关闭"}`,
+      enabled && this.state.continuousReadingState === "idle",
+    );
+  }
+
+  private setCaptionEnabled(enabled: boolean): void {
+    if (this.state.captionEnabled === enabled) {
+      return;
+    }
+    this.commitState({ captionEnabled: enabled });
+    const result = this.output?.setCaptionEnabled(enabled);
+    if (result?.stopTextOnlyContinuous) {
+      this.reading?.stopContinuous("stopped");
+    }
+    this.updateAvailability();
+    this.ui?.announce(`大字幕已${enabled ? "开启" : "关闭"}`);
+  }
+
+  private setCaptionFontSize(size: CaptionFontSize): void {
+    if (this.state.captionFontSize === size) {
+      return;
+    }
+    this.commitState({ captionFontSize: size });
+    this.ui?.announce(`字幕字号 ${size}px`);
+  }
+
+  private setCaptionScript(script: CaptionScript): void {
+    if (this.state.captionScript === script) {
+      return;
+    }
+    this.commitState({ captionScript: script });
+    this.ui?.announce(
+      `字幕已切换为${script === "simplified" ? "简体" : "繁体"}`,
+    );
+  }
+
+  private setCaptionPinyinEnabled(enabled: boolean): void {
+    if (this.state.captionPinyinEnabled === enabled) {
+      return;
+    }
+    this.commitState({ captionPinyinEnabled: enabled });
+    this.ui?.announce(`字幕拼音已${enabled ? "开启" : "关闭"}`);
   }
 
   private cycleSpeechRate(): void {
@@ -935,9 +1002,6 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
   private applyState(persist: boolean): void {
     this.ui?.updateState(this.state);
     this.effects?.apply(this.state);
-    if (!this.state.readingEnabled) {
-      this.reading?.cancel();
-    }
     if (persist) {
       this.savePreferences();
     }
@@ -974,7 +1038,7 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
     );
     this.ui?.setFeatureAvailability(
       "speechRate",
-      speechSupported,
+      speechSupported || this.state.captionEnabled,
       "当前浏览器不支持语音合成，无法设置语速",
     );
     const screenSound = this.ui?.getControl("screenSound");
@@ -992,12 +1056,12 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
   }
 
   private startContinuousReading(): void {
-    if (!this.speech?.isSupported()) {
+    if (!this.speech?.isSupported() && !this.state.captionEnabled) {
       this.announce("当前浏览器不支持语音合成", false);
       this.updateContinuousReadingSettings();
       return;
     }
-    if (!this.state.readingEnabled) {
+    if (!this.state.readingEnabled && !this.state.captionEnabled) {
       this.commitState({ readingEnabled: true });
     }
     const result = this.reading?.startContinuous() ?? "empty";
@@ -1073,7 +1137,7 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
 
   private previewVoice(): void {
     const model = this.createVoiceSettingsModel();
-    if (!model.previewEnabled || !this.speech) {
+    if (!model.previewEnabled || !this.output) {
       this.announce(model.statusMessage || "当前没有可试听的本地音色", false);
       return;
     }
@@ -1092,11 +1156,13 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
     };
     this.voicePreviewActive = true;
     this.updateVoiceSettings();
-    const cancel = this.speech.speak(
+    const cancel = this.output.speak(
       getVoicePreviewText(model.effectiveLanguage),
       model.effectiveLanguage,
       this.state.speechRate,
       {
+        kind: "preview",
+        forceAudio: true,
         onEnd: finish,
         onError: finish,
         onCancel: finish,
@@ -1130,7 +1196,8 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
     const segment = this.reading?.getCurrentSegment() ?? null;
     this.ui?.updateContinuousReadingSettings({
       state: this.state.continuousReadingState,
-      supported: this.speech?.isSupported() ?? false,
+      supported:
+        (this.speech?.isSupported() ?? false) || this.state.captionEnabled,
       position: segment
         ? {
             index: segment.index,
@@ -1239,12 +1306,17 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
 
   private announce(message: string, synthesize = true): void {
     this.ui?.announce(message);
-    if (synthesize && this.state.readingEnabled && this.speech?.isSupported()) {
+    if (
+      synthesize &&
+      this.output &&
+      (this.state.readingEnabled || this.state.captionEnabled)
+    ) {
       this.reading?.stopContinuous("interaction");
-      this.speech.speak(
+      this.output.speak(
         message,
         this.activeConfig.locale,
         this.state.speechRate,
+        { kind: "announcement" },
       );
     }
   }
@@ -1346,6 +1418,10 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
       crosshair: this.state.crosshair,
       isPinned: this.state.isPinned,
       isReadScreen: this.state.isReadScreen,
+      captionEnabled: this.state.captionEnabled,
+      captionFontSize: this.state.captionFontSize,
+      captionScript: this.state.captionScript,
+      captionPinyinEnabled: this.state.captionPinyinEnabled,
       ...(this.preferredLanguage
         ? { preferredLanguage: this.preferredLanguage }
         : {}),
@@ -1431,6 +1507,10 @@ function createDefaultState(
     isReadScreen: false,
     readingEnabled: false,
     continuousReadingState: "idle",
+    captionEnabled: false,
+    captionFontSize: 36,
+    captionScript: "simplified",
+    captionPinyinEnabled: false,
     speechRate: clamp(config.speech.defaultRate, 0.5, 2),
     colorScheme: "original",
     zoom: 1,
@@ -1460,6 +1540,10 @@ function hydrateState(
     crosshair: stored.crosshair,
     isPinned: stored.isPinned,
     isReadScreen: stored.isReadScreen,
+    captionEnabled: stored.captionEnabled ?? false,
+    captionFontSize: stored.captionFontSize ?? 36,
+    captionScript: stored.captionScript ?? "simplified",
+    captionPinyinEnabled: stored.captionPinyinEnabled ?? false,
   };
 }
 
@@ -1470,8 +1554,11 @@ function constrainStateToFeatures(
   return {
     ...state,
     readingEnabled: config.features.reading && state.readingEnabled,
+    captionEnabled:
+      config.features.largeCaption && state.captionEnabled,
     continuousReadingState:
-      config.features.reading && config.features.continuousReading
+      config.features.continuousReading &&
+      (config.features.reading || config.features.largeCaption)
       ? state.continuousReadingState
       : "idle",
     colorScheme: config.features.colorScheme

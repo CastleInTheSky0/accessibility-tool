@@ -64,6 +64,7 @@ describe("AccessibilityTool singleton lifecycle", () => {
       "大鼠标",
       "十字线",
       "大界面",
+      "大字幕",
       "固定",
       "重置",
       "帮助",

@@ -36,6 +36,31 @@ describe("SpeechController", () => {
     expect(ends).not.toHaveBeenCalled();
   });
 
+  it("settles an end-before-start without forging public speech events", () => {
+    const requests: SpeechRequestOptions[] = [];
+    const adapter: SpeechAdapter = {
+      speak: (_text, options) => requests.push(options),
+      cancel: vi.fn(),
+      isSupported: () => true,
+    };
+    const emitter = new TypedEmitter<AccessibilityToolEventMap>();
+    const starts = vi.fn();
+    const ends = vi.fn();
+    const callbackEnd = vi.fn();
+    emitter.on("speechstart", starts);
+    emitter.on("speechend", ends);
+    const speech = new SpeechController(adapter, emitter);
+
+    speech.speak("没有开始事件", "zh-CN", 1, { onEnd: callbackEnd });
+    requests[0]?.onEnd?.();
+    requests[0]?.onStart?.();
+    requests[0]?.onEnd?.();
+
+    expect(callbackEnd).toHaveBeenCalledOnce();
+    expect(starts).not.toHaveBeenCalled();
+    expect(ends).not.toHaveBeenCalled();
+  });
+
   it("settles each request once and ignores callbacks that arrive after end or error", () => {
     const requests: SpeechRequestOptions[] = [];
     const adapter: SpeechAdapter = {
