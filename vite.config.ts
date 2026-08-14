@@ -116,6 +116,7 @@ export default defineConfig(({ command, isPreview, mode }) => {
     plugins: [
       ...(isPublicDevelopment ? [publicDemoDevelopment()] : []),
       dts({
+        entryRoot: "src",
         include: ["src"],
       }),
       emitExternalStyles(),
