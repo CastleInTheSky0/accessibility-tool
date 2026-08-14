@@ -1,0 +1,160 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Verify and publish release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      NODE_VERSION: "22"
+      PNPM_VERSION: "10.28.0"
+      RELEASE_ARCHIVE: accessibility-tool-${{ github.ref_name }}.zip
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Validate tag version and main ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node --input-type=module <<'NODE'
+          import { readFileSync } from "node:fs";
+
+          const { version } = JSON.parse(readFileSync("package.json", "utf8"));
+          const identifier = String.raw`(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)`;
+          const semverPattern = new RegExp(
+            String.raw`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-${identifier}(?:\.${identifier})*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$`,
+          );
+          if (typeof version !== "string" || !semverPattern.test(version)) {
+            throw new Error(`package.json version is not valid SemVer: ${String(version)}`);
+          }
+
+          const expectedTag = `v${version}`;
+          if (process.env.GITHUB_REF_NAME !== expectedTag) {
+            throw new Error(
+              `Release tag ${process.env.GITHUB_REF_NAME} does not match ${expectedTag}`,
+            );
+          }
+          console.log(`Validated release tag ${expectedTag}`);
+          NODE
+
+          git fetch --no-tags origin \
+            "+refs/heads/main:refs/remotes/origin/main"
+          tag_commit="$(git rev-parse "${GITHUB_REF_NAME}^{commit}")"
+          if ! git merge-base --is-ancestor \
+            "${tag_commit}" refs/remotes/origin/main; then
+            echo "Tagged commit ${tag_commit} is not contained in origin/main" >&2
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Run unit tests
+        run: pnpm test
+
+      - name: Build production package
+        run: pnpm build
+
+      - name: Install Chrome and Edge
+        run: pnpm exec playwright install --with-deps chrome msedge
+
+      - name: Run Chrome and Edge end-to-end tests
+        run: pnpm test:e2e
+
+      - name: Package and verify release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          package_directory="${RUNNER_TEMP}/accessibility-tool-package"
+          asset_directory="${RUNNER_TEMP}/accessibility-tool-assets"
+          expected_manifest="${RUNNER_TEMP}/accessibility-tool-expected.txt"
+          zip_manifest="${RUNNER_TEMP}/accessibility-tool-zip.txt"
+          mkdir "${package_directory}" "${asset_directory}"
+
+          runtime_files=(
+            "accessibility-tool.min.js"
+            "accessibility-tool.es.js"
+            "accessibility-tool.css"
+            "accessibility-tool-opencc.js"
+            "accessibility-tool-pinyin.js"
+          )
+          release_files=("${runtime_files[@]}" "LICENSE")
+
+          for file_name in "${runtime_files[@]}"; do
+            install -m 0644 "dist/${file_name}" "${package_directory}/${file_name}"
+          done
+          install -m 0644 LICENSE "${package_directory}/LICENSE"
+
+          printf '%s\n' "${release_files[@]}" | LC_ALL=C sort > "${expected_manifest}"
+          find "${package_directory}" -mindepth 1 -maxdepth 1 -type f \
+            -printf '%f\n' | LC_ALL=C sort > "${zip_manifest}"
+          diff --unified "${expected_manifest}" "${zip_manifest}"
+
+          if find "${package_directory}" -mindepth 1 -type d -print -quit \
+            | grep --quiet .; then
+            echo "Release staging directory contains an unexpected directory" >&2
+            exit 1
+          fi
+
+          (
+            cd "${package_directory}"
+            zip -X -q \
+              "${asset_directory}/${RELEASE_ARCHIVE}" \
+              "${release_files[@]}"
+          )
+
+          zipinfo -1 "${asset_directory}/${RELEASE_ARCHIVE}" \
+            | LC_ALL=C sort > "${zip_manifest}"
+          diff --unified "${expected_manifest}" "${zip_manifest}"
+
+          (
+            cd "${asset_directory}"
+            sha256sum "${RELEASE_ARCHIVE}" > SHA256SUMS
+            sha256sum --check SHA256SUMS
+          )
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset_directory="${RUNNER_TEMP}/accessibility-tool-assets"
+          gh release create "${GITHUB_REF_NAME}" \
+            --verify-tag \
+            --generate-notes \
+            --title "AccessibilityTool ${GITHUB_REF_NAME}" \
+            "${asset_directory}/${RELEASE_ARCHIVE}" \
+            "${asset_directory}/SHA256SUMS"
