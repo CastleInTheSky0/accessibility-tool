@@ -1,0 +1,5 @@
+{"file":".trellis/spec/frontend/index.md","reason":"前端规范入口与审查范围"}
+{"file":".trellis/spec/frontend/accessibility-tool-contract.md","reason":"核对构建产物、语言分包与完整发布门禁"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"核对代码质量与测试覆盖"}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"核对包声明路径与实际声明产物一致"}
+{"file":".trellis/tasks/08-14-github-release/research/github-release-actions.md","reason":"核对工作流权限、版本固定和 Release 命令"}

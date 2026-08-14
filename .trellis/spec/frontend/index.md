@@ -21,6 +21,7 @@ This directory contains guidelines for frontend development. Fill in each file w
 | [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
 | [Type Safety](./type-safety.md) | Type patterns, validation | To fill |
 | [AccessibilityTool Runtime Contract](./accessibility-tool-contract.md) | Executable API, DOM protocol, error and test contracts | Implemented |
+| [GitHub Release Workflow Contract](./release-workflow-contract.md) | Tag validation, release gates, artifact and permission contracts | Implemented |
 
 ---
 
