@@ -1,7 +1,3 @@
-import { ConverterBuilder, type ConverterFunction } from "opencc-js/core";
-import * as cn2t from "opencc-js/preset/cn2t";
-import * as t2cn from "opencc-js/preset/t2cn";
-import { pinyin } from "pinyin-pro";
 import { getDeepActiveElement, isVisible } from "../core/dom";
 import type {
   AccessibilityToolState,
@@ -9,6 +5,10 @@ import type {
   CaptionScript,
 } from "../types";
 import type { CaptionOutputModel } from "../features/output";
+import {
+  captionLanguageRuntime,
+  type CaptionLanguageRuntime,
+} from "./caption-language";
 
 interface LargeCaptionCallbacks {
   onClose: () => void;
@@ -29,9 +29,6 @@ interface CaptionPresentation {
   readonly segments: readonly CaptionPresentationSegment[] | null;
 }
 
-let simplifiedConverter: ConverterFunction | null = null;
-let traditionalConverter: ConverterFunction | null = null;
-
 export class LargeCaptionUI {
   readonly element: HTMLDivElement;
   private readonly body: HTMLDivElement;
@@ -41,6 +38,8 @@ export class LargeCaptionUI {
   private readonly sizeButtons = new Map<CaptionFontSize, HTMLButtonElement>();
   private readonly pinyinButton: HTMLButtonElement;
   private model: CaptionOutputModel | null = null;
+  private presentationGeneration = 0;
+  private scrollInteractionRevision = 0;
   private preferences: Pick<
     AccessibilityToolState,
     "captionFontSize" | "captionScript" | "captionPinyinEnabled"
@@ -55,6 +54,7 @@ export class LargeCaptionUI {
     private readonly documentRef: Document,
     shadowRoot: ShadowRoot,
     private readonly callbacks: LargeCaptionCallbacks,
+    private readonly languages: CaptionLanguageRuntime = captionLanguageRuntime,
   ) {
     this.element = documentRef.createElement("div");
     this.element.className = "a11y-large-caption";
@@ -113,6 +113,22 @@ export class LargeCaptionUI {
     this.element.append(controls, this.body);
     shadowRoot.append(this.element);
 
+    const markScrollInteraction = (): void => {
+      this.scrollInteractionRevision += 1;
+    };
+    this.body.addEventListener("wheel", markScrollInteraction, {
+      passive: true,
+    });
+    this.body.addEventListener("touchmove", markScrollInteraction, {
+      passive: true,
+    });
+    this.body.addEventListener("pointerdown", markScrollInteraction);
+    this.body.addEventListener("keydown", (event) => {
+      if (isScrollKey(event.key)) {
+        markScrollInteraction();
+      }
+    });
+
     this.element.addEventListener("pointerdown", () => {
       this.rememberFocusBeforeControls();
     }, true);
@@ -149,8 +165,12 @@ export class LargeCaptionUI {
       "aria-label",
       `字幕拼音，当前${state.captionPinyinEnabled ? "开启" : "关闭"}`,
     );
-    if (this.model && presentationChanged) {
-      this.renderText();
+    if (presentationChanged) {
+      if (this.model) {
+        this.scheduleTextPresentation(true);
+      } else {
+        this.presentationGeneration += 1;
+      }
     }
   }
 
@@ -163,8 +183,8 @@ export class LargeCaptionUI {
     this.status.textContent = model.status;
     this.element.dataset.captionState = toCaptionState(model.status);
     this.element.hidden = false;
-    if (textChanged) {
-      this.renderText();
+    if (textChanged || resetScroll) {
+      this.scheduleTextPresentation(!resetScroll);
     }
     if (resetScroll) {
       this.body.scrollTop = 0;
@@ -172,6 +192,7 @@ export class LargeCaptionUI {
   }
 
   hide(): void {
+    this.presentationGeneration += 1;
     this.element.hidden = true;
     this.model = null;
     this.text.replaceChildren();
@@ -179,22 +200,66 @@ export class LargeCaptionUI {
   }
 
   destroy(): void {
+    this.presentationGeneration += 1;
     this.element.remove();
     this.model = null;
     this.focusBeforeControls = null;
   }
 
-  private renderText(): void {
+  private scheduleTextPresentation(preserveScroll: boolean): void {
     const model = this.model;
     if (!model) {
+      this.presentationGeneration += 1;
       this.text.replaceChildren();
       return;
     }
-    const presentation = deriveCaptionPresentation(
-      model.text,
-      this.preferences.captionScript,
-      this.preferences.captionPinyinEnabled,
-    );
+    const generation = ++this.presentationGeneration;
+    const original = model.text;
+    const script = this.preferences.captionScript;
+    const includePinyin = this.preferences.captionPinyinEnabled;
+    const retainedScrollTop = preserveScroll ? this.body.scrollTop : null;
+    const scrollInteractionRevision = this.scrollInteractionRevision;
+    this.text.textContent = original;
+    if (retainedScrollTop !== null) {
+      this.restoreScrollTop(retainedScrollTop);
+    }
+    const fallbackScrollTop = this.body.scrollTop;
+    void deriveCaptionPresentation(
+      original,
+      script,
+      includePinyin,
+      this.languages,
+    ).then((presentation) => {
+      if (
+        generation !== this.presentationGeneration ||
+        this.element.hidden ||
+        this.model?.text !== original ||
+        this.preferences.captionScript !== script ||
+        this.preferences.captionPinyinEnabled !== includePinyin
+      ) {
+        return;
+      }
+      const scrollTopBeforeCommit = this.body.scrollTop;
+      this.applyTextPresentation(presentation);
+      if (retainedScrollTop !== null) {
+        this.restoreScrollTop(
+          this.scrollInteractionRevision === scrollInteractionRevision &&
+            scrollTopBeforeCommit === fallbackScrollTop
+            ? retainedScrollTop
+            : scrollTopBeforeCommit,
+        );
+      }
+    }).catch(() => {
+      // The original text is already visible; language failures are non-fatal.
+    });
+  }
+
+  private restoreScrollTop(scrollTop: number): void {
+    const maximum = Math.max(0, this.body.scrollHeight - this.body.clientHeight);
+    this.body.scrollTop = Math.min(Math.max(0, scrollTop), maximum);
+  }
+
+  private applyTextPresentation(presentation: CaptionPresentation): void {
     if (!presentation.segments) {
       this.text.textContent = presentation.text;
       return;
@@ -303,18 +368,42 @@ export function deriveCaptionPresentation(
   original: string,
   script: CaptionScript,
   includePinyin: boolean,
-): CaptionPresentation {
-  const displayText = convertCaptionText(original, script);
+  languages: CaptionLanguageRuntime = captionLanguageRuntime,
+): Promise<CaptionPresentation> {
+  return deriveCaptionPresentationAsync(
+    original,
+    script,
+    includePinyin,
+    languages,
+  );
+}
+
+async function deriveCaptionPresentationAsync(
+  original: string,
+  script: CaptionScript,
+  includePinyin: boolean,
+  languages: CaptionLanguageRuntime,
+): Promise<CaptionPresentation> {
+  const openCCRequest = languages.loadOpenCC().catch(() => null);
+  const pinyinRequest = includePinyin
+    ? languages.loadPinyin().catch(() => null)
+    : null;
+  const openCC = await openCCRequest;
+  const displayText = safeConvertCaptionText(openCC, original, script);
   if (!includePinyin) {
     return { text: displayText, segments: null };
   }
+  const pinyinModule = await pinyinRequest;
+  if (!pinyinModule) {
+    return { text: displayText, segments: null };
+  }
   try {
-    const phoneticSource = convertCaptionText(original, "simplified");
-    const annotations = pinyin(phoneticSource, {
-      type: "all",
-      toneType: "symbol",
-      nonZh: "consecutive",
-    });
+    const phoneticSource = safeConvertCaptionText(
+      openCC,
+      original,
+      "simplified",
+    );
+    const annotations = pinyinModule.annotateCaptionPinyin(phoneticSource);
     if (annotations.map(({ origin }) => origin).join("") !== phoneticSource) {
       return { text: displayText, segments: null };
     }
@@ -342,20 +431,16 @@ export function deriveCaptionPresentation(
   }
 }
 
-export function convertCaptionText(
+function safeConvertCaptionText(
+  openCC: Awaited<ReturnType<CaptionLanguageRuntime["loadOpenCC"]>> | null,
   original: string,
   script: CaptionScript,
 ): string {
+  if (!openCC) {
+    return original;
+  }
   try {
-    if (!simplifiedConverter) {
-      simplifiedConverter = ConverterBuilder(t2cn)({ from: "t", to: "cn" });
-    }
-    if (!traditionalConverter) {
-      traditionalConverter = ConverterBuilder(cn2t)({ from: "cn", to: "t" });
-    }
-    return script === "traditional"
-      ? traditionalConverter(original)
-      : simplifiedConverter(original);
+    return openCC.convertCaptionText(original, script);
   } catch {
     return original;
   }
@@ -372,4 +457,18 @@ function toCaptionState(status: CaptionOutputModel["status"]): string {
     case "已结束":
       return "ended";
   }
+}
+
+function isScrollKey(key: string): boolean {
+  return [
+    "ArrowDown",
+    "ArrowLeft",
+    "ArrowRight",
+    "ArrowUp",
+    "End",
+    "Home",
+    "PageDown",
+    "PageUp",
+    " ",
+  ].includes(key);
 }

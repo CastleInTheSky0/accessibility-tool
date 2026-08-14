@@ -8,6 +8,16 @@
 <script defer src="/assets/accessibility-tool.min.js"></script>
 ```
 
+页面虽然只写一个 `<script>`，部署时仍需把以下三个构建文件放在同一目录：
+
+```text
+/assets/accessibility-tool.min.js
+/assets/accessibility-tool-opencc.js
+/assets/accessibility-tool-pinyin.js
+```
+
+主入口会在首次显示字幕时自动加载 OpenCC 分包，并只在首次开启拼音时加载拼音分包；初次请求带当前包版本 `?v=<version>`，不需要额外标签或 CDN。请整体复制 `dist`，不要只复制主 JS；升级时原子替换同一次构建产生的三个文件，避免跨版本混用。若三个文件跨域托管，还需为两个 ESM 分包配置 CORS，并在站点 CSP 的 `script-src` 中允许该静态源。
+
 没有已保存的打开意图时，脚本本身不会打开工具或扫描页面。用户曾成功打开且未主动退出时，后续同源页面会在 DOM ready 后静默恢复。
 
 ## 2. 配置站点参数

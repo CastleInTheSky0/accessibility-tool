@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import packageMetadata from "../../package.json" with { type: "json" };
 
 interface StoredCaptionPreferencePayload {
   preferences?: {
@@ -167,7 +168,14 @@ test("shows independent text output, applies language settings and restores focu
       readingEnabled: false,
       captionEnabled: false,
     });
-  expect(runtimeResourceRequests).toEqual([]);
+  expect(
+    runtimeResourceRequests
+      .map((url) => new URL(url).pathname)
+      .sort(),
+  ).toEqual([
+    "/accessibility-tool-opencc.js",
+    "/accessibility-tool-pinyin.js",
+  ]);
 });
 
 test("restores caption preferences across reload and navigation without persisting text", async ({
@@ -263,7 +271,7 @@ test("restores caption preferences across reload and navigation without persisti
   ).not.toContain("CAPTION_BODY_MUST_NOT_PERSIST_20260814");
 });
 
-test("loads bundled language data once and makes no runtime language requests", async ({
+test("loads same-directory language chunks on demand and caches successful imports", async ({
   page,
 }) => {
   const runtimeResourceRequests: Array<{ type: string; url: string }> = [];
@@ -302,21 +310,165 @@ test("loads bundled language data once and makes no runtime language requests", 
     .locator('[data-mode="main"] [data-action="largeCaption"]')
     .click();
   await page.locator("#large-caption-network-source").focus();
+  const languageRequestPaths = (): string[] =>
+    runtimeResourceRequests
+      .map(({ url }) => new URL(url).pathname)
+      .filter((path) =>
+        path === "/accessibility-tool-opencc.js" ||
+        path === "/accessibility-tool-pinyin.js",
+      );
+  await expect.poll(languageRequestPaths).toEqual([
+    "/accessibility-tool-opencc.js",
+  ]);
+
   await caption
     .locator('[data-caption-script="traditional"]')
     .click();
+  await expect(caption.locator(".a11y-large-caption__text")).toHaveText(
+    "文本：漢語龍馬 A11Y",
+  );
+  expect(languageRequestPaths()).toEqual([
+    "/accessibility-tool-opencc.js",
+  ]);
+
   await caption.getByRole("button", { name: /字幕拼音/ }).click();
   await expect(
     caption.locator(".a11y-large-caption__pinyin", { hasText: "hàn" }),
   ).toHaveCount(1);
-  await page.waitForTimeout(250);
+  await expect.poll(languageRequestPaths).toEqual([
+    "/accessibility-tool-opencc.js",
+    "/accessibility-tool-pinyin.js",
+  ]);
 
-  expect(runtimeResourceRequests).toEqual(initialRequests);
-  expect(
-    runtimeResourceRequests.filter(({ url }) =>
-      /(?:opencc|pinyin|language|locale)/i.test(url),
-    ),
-  ).toEqual([]);
+  await caption.getByRole("button", { name: /字幕拼音/ }).click();
+  await caption.getByRole("button", { name: /字幕拼音/ }).click();
+  await caption.getByRole("button", { name: "简体", exact: true }).click();
+  await caption.getByRole("button", { name: "繁体", exact: true }).click();
+  expect(languageRequestPaths()).toEqual([
+    "/accessibility-tool-opencc.js",
+    "/accessibility-tool-pinyin.js",
+  ]);
+});
+
+test("keeps original text after a language chunk failure and retries with a new URL", async ({
+  page,
+}) => {
+  const attemptedUrls: string[] = [];
+  await page.route("**/accessibility-tool-opencc.js*", async (route) => {
+    attemptedUrls.push(route.request().url());
+    if (attemptedUrls.length === 1) {
+      await route.fulfill({
+        status: 503,
+        contentType: "text/javascript",
+        body: "",
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.getByRole("button", { name: "打开无障碍工具" }).click();
+  const host = page.locator("[data-a11y-tool-host]");
+  const caption = host.locator(".a11y-large-caption");
+  await host
+    .locator('[data-mode="main"] [data-action="largeCaption"]')
+    .click();
+  const failedResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      url.pathname === "/accessibility-tool-opencc.js" &&
+      response.status() === 503
+    );
+  });
+  await page.locator("#large-caption-source").focus();
+
+  await failedResponse;
+  await expect(caption.locator(".a11y-large-caption__text")).toHaveText(
+    "文本：汉语龙马 A11Y",
+  );
+  await page.evaluate(
+    () => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    }),
+  );
+
+  await caption
+    .locator('[data-caption-script="traditional"]')
+    .click();
+  await expect(caption.locator(".a11y-large-caption__text")).toHaveText(
+    "文本：漢語龍馬 A11Y",
+  );
+  expect(attemptedUrls).toHaveLength(2);
+  const initialUrl = new URL(attemptedUrls[0] ?? "");
+  const retryUrl = new URL(attemptedUrls[1] ?? "");
+  expect(initialUrl.searchParams.get("v")).toBe(packageMetadata.version);
+  expect(initialUrl.searchParams.has("retry")).toBe(false);
+  expect(retryUrl.searchParams.get("v")).toBe(packageMetadata.version);
+  expect(retryUrl.searchParams.get("retry")).toBe(
+    "1",
+  );
+});
+
+test("retries the pinyin chunk independently without replacing written text", async ({
+  page,
+}) => {
+  const attemptedUrls: string[] = [];
+  await page.route("**/accessibility-tool-pinyin.js*", async (route) => {
+    attemptedUrls.push(route.request().url());
+    if (attemptedUrls.length === 1) {
+      await route.fulfill({
+        status: 503,
+        contentType: "text/javascript",
+        body: "",
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.getByRole("button", { name: "打开无障碍工具" }).click();
+  const host = page.locator("[data-a11y-tool-host]");
+  const caption = host.locator(".a11y-large-caption");
+  await host
+    .locator('[data-mode="main"] [data-action="largeCaption"]')
+    .click();
+  await page.locator("#large-caption-source").focus();
+  await expect(caption.locator(".a11y-large-caption__text")).toHaveText(
+    "文本：汉语龙马 A11Y",
+  );
+
+  const failedResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      url.pathname === "/accessibility-tool-pinyin.js" &&
+      response.status() === 503
+    );
+  });
+  const pinyin = caption.getByRole("button", { name: /字幕拼音/ });
+  await pinyin.click();
+  await failedResponse;
+  await page.evaluate(
+    () => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    }),
+  );
+  await expect(caption.locator(".a11y-large-caption__text")).toHaveText(
+    "文本：汉语龙马 A11Y",
+  );
+  await expect(caption.locator(".a11y-large-caption__pinyin")).toHaveCount(0);
+
+  await pinyin.click();
+  await pinyin.click();
+  await expect(
+    caption.locator(".a11y-large-caption__pinyin", { hasText: "hàn" }),
+  ).toHaveCount(1);
+  expect(attemptedUrls).toHaveLength(2);
+  const initialUrl = new URL(attemptedUrls[0] ?? "");
+  const retryUrl = new URL(attemptedUrls[1] ?? "");
+  expect(initialUrl.searchParams.get("v")).toBe(packageMetadata.version);
+  expect(initialUrl.searchParams.has("retry")).toBe(false);
+  expect(retryUrl.searchParams.get("v")).toBe(packageMetadata.version);
+  expect(retryUrl.searchParams.get("retry")).toBe("1");
 });
 
 test("reflows long pinyin text without moving or hiding its controls", async ({

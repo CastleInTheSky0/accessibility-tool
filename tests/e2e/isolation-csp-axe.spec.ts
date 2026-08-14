@@ -44,8 +44,18 @@ test("uses a closed Shadow Root outside debug mode", async ({ page }) => {
 
 test("loads the toolbar under strict external-style CSP", async ({ page }) => {
   const errors: string[] = [];
+  const languageRequests: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error") errors.push(message.text());
+  });
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (
+      path === "/accessibility-tool-opencc.js" ||
+      path === "/accessibility-tool-pinyin.js"
+    ) {
+      languageRequests.push(path);
+    }
   });
   await page.goto("/demos/csp.html?debug=1");
   await page.getByRole("button", { name: "打开工具" }).click();
@@ -58,6 +68,30 @@ test("loads the toolbar under strict external-style CSP", async ({ page }) => {
   await expect(
     page.locator("[data-a11y-tool-host] .a11y-focus-highlight"),
   ).toHaveCount(0);
+
+  const host = page.locator("[data-a11y-tool-host]");
+  await host.locator('[data-action="largeCaption"]').first().click();
+  await page.evaluate(() => {
+    const captionTarget = document.createElement("p");
+    captionTarget.id = "csp-caption-target";
+    captionTarget.tabIndex = 0;
+    captionTarget.textContent = "汉语龙马";
+    document.body.append(captionTarget);
+    captionTarget.focus();
+  });
+  const caption = host.locator(".a11y-large-caption");
+  await caption.locator('[data-caption-script="traditional"]').click();
+  await expect(caption.locator(".a11y-large-caption__text")).toHaveText(
+    "文本：漢語龍馬",
+  );
+  await caption.getByRole("button", { name: /字幕拼音/ }).click();
+  await expect(
+    caption.locator(".a11y-large-caption__pinyin", { hasText: "hàn" }),
+  ).toHaveCount(1);
+  expect(languageRequests).toEqual([
+    "/accessibility-tool-opencc.js",
+    "/accessibility-tool-pinyin.js",
+  ]);
   expect(errors.filter((message) => message.includes("Content Security Policy"))).toEqual([]);
 });
 

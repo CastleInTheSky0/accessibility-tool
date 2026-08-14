@@ -180,7 +180,7 @@ describe("ToolbarUI", () => {
     host.remove();
   });
 
-  it("renders untrusted caption content through text nodes in pinyin mode", () => {
+  it("renders untrusted caption content through text nodes in pinyin mode", async () => {
     const { host, shadow, ui } = createToolbar();
     const source =
       '文本：<img src=x onerror="globalThis.captionInjected=true"> 汉字 & <script>坏</script>';
@@ -195,15 +195,18 @@ describe("ToolbarUI", () => {
       ".a11y-large-caption__text",
     );
     expect(text?.querySelector("img, script")).toBeNull();
-    expect(
-      Array.from(
-        text?.querySelectorAll<HTMLElement>(
-          ".a11y-large-caption__written",
-        ) ?? [],
-      )
-        .map((node) => node.textContent ?? "")
-        .join(""),
-    ).toBe(source);
+    await vi.waitFor(() => {
+      expect(
+        Array.from(
+          text?.querySelectorAll<HTMLElement>(
+            ".a11y-large-caption__written",
+          ) ?? [],
+        )
+          .map((node) => node.textContent ?? "")
+          .join(""),
+      ).toBe(source);
+    });
+    expect(text?.querySelector("img, script")).toBeNull();
     expect(
       (globalThis as typeof globalThis & { captionInjected?: boolean })
         .captionInjected,
