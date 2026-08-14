@@ -37,13 +37,15 @@ test("restores across reload and same-origin navigation until close", async ({
   await expect(host).toBeVisible();
   await expect(reloadTrigger).toBeFocused();
   await expect(reloadTrigger).not.toHaveAttribute("aria-expanded", "true");
-  await expect(host.locator('[role="status"]')).toHaveText("");
+  await expect(
+    host.locator('.a11y-visually-hidden[role="status"]'),
+  ).toHaveText("");
 
   await reloadTrigger.click();
   await expect(host.locator('[data-action="reading"]')).toBeFocused();
-  await expect(host.locator('[role="status"]')).toContainText(
-    "无障碍工具栏已打开",
-  );
+  await expect(
+    host.locator('.a11y-visually-hidden[role="status"]'),
+  ).toContainText("无障碍工具栏已打开");
   await expect(reloadTrigger).toHaveAttribute("aria-expanded", "true");
 
   await page.goto("/demos/semantic-off.html?debug=1");
@@ -146,7 +148,9 @@ test("silently restores pinned read-screen mode and schedules its collapse", asy
   await expect(host).toBeVisible();
   await expect(screenGroup).toHaveJSProperty("hidden", false);
   await expect(trigger).toBeFocused();
-  await expect(host.locator('[role="status"]')).not.toContainText(
+  await expect(
+    host.locator('.a11y-visually-hidden[role="status"]'),
+  ).not.toContainText(
     "无障碍工具栏已打开",
   );
   await expect

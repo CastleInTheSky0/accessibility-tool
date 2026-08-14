@@ -1,0 +1,5 @@
+{"file":".trellis/spec/frontend/accessibility-tool-contract.md","reason":"Verify API, DOM protocol, lifecycle, compatibility and required test behavior."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Verify lint, type safety and regression coverage."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Check that existing scanner, tabs, event and speech flows remain the single implementation."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Check public type, runtime, DOM, scanner, navigation and docs consistency."}
+{"file":".trellis/tasks/08-05-dom-region-registration/research/existing-runtime-integration.md","reason":"Review implementation against the repository-specific ownership and refresh design."}

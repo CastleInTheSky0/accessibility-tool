@@ -36,13 +36,16 @@ describe("configuration", () => {
   it("keeps the confirmed feature order", () => {
     expect(MAIN_FEATURE_ORDER).toEqual([
       "reading",
+      "continuousReading",
       "speechRate",
+      "voiceSelection",
       "colorScheme",
       "zoomIn",
       "zoomOut",
       "largeCursor",
       "crosshair",
       "fullscreen",
+      "largeCaption",
       "pin",
       "reset",
       "help",

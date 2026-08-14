@@ -1,13 +1,61 @@
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_CONFIG } from "../../src/core/config";
+import { DEFAULT_CONFIG, mergeConfig } from "../../src/core/config";
 import type { PageEffectsController } from "../../src/features/page-effects";
 import { ReadingController } from "../../src/features/reading";
+import type { OutputRequestOptions } from "../../src/features/output";
 import { RegionNavigationController } from "../../src/features/region-navigation";
 import type { ScannedRegion } from "../../src/features/regions";
 import type { SpeechController } from "../../src/features/speech";
 import { TabsController } from "../../src/features/tabs";
 
 describe("ReadingController region focus coordination", () => {
+  it("ignores a stale cancel callback when the same target is replaced", () => {
+    document.body.innerHTML = `<button id="replacement-target">重复目标</button>`;
+    let activeCancel: (() => void) | undefined;
+    let latestOptions: OutputRequestOptions | undefined;
+    const output = {
+      speak: vi.fn(
+        (
+          _text: string,
+          _lang: string,
+          _rate: number,
+          options: OutputRequestOptions,
+        ) => {
+          activeCancel?.();
+          activeCancel = options.onCancel;
+          latestOptions = options;
+          return vi.fn();
+        },
+      ),
+      cancel: vi.fn(() => activeCancel?.()),
+    };
+    const effects = {
+      setHighlight: vi.fn(),
+      clearHighlight: vi.fn(),
+    };
+    const reading = new ReadingController(
+      DEFAULT_CONFIG,
+      output,
+      effects as unknown as PageEffectsController,
+      readingState(),
+      {
+        isRegionContainer: () => false,
+        isTabSpeechTarget: () => false,
+      },
+    );
+    const target = get("replacement-target");
+
+    reading.speakElement(target, true);
+    reading.speakElement(target, true);
+
+    expect(effects.setHighlight).toHaveBeenCalledTimes(2);
+    expect(effects.clearHighlight).not.toHaveBeenCalled();
+
+    latestOptions?.onEnd?.();
+    expect(effects.clearHighlight).toHaveBeenCalledOnce();
+    expect(effects.clearHighlight).toHaveBeenCalledWith(target);
+  });
+
   it("speaks input fields with the input semantic prefix", () => {
     document.body.innerHTML = `
       <input id="search-field" placeholder="请输入关键词">
@@ -25,7 +73,7 @@ describe("ReadingController region focus coordination", () => {
       DEFAULT_CONFIG,
       speech,
       effects as unknown as PageEffectsController,
-      { isEnabled: () => true, getRate: () => 1 },
+      readingState(),
       {
         isRegionContainer: () => false,
         isTabSpeechTarget: () => false,
@@ -43,6 +91,114 @@ describe("ReadingController region focus coordination", () => {
       expect.any(Object),
     );
     reading.stop();
+  });
+
+  it("re-resolves normalized language when DOM or preference inputs change", () => {
+    document.documentElement.removeAttribute("lang");
+    document.body.innerHTML = `
+      <section id="language-parent" lang="ja-JP">
+        <button id="language-target" lang="en_US">Hello world</button>
+      </section>
+    `;
+    const speak = vi.fn();
+    const speech = {
+      speak,
+      cancel: vi.fn(),
+    } as unknown as SpeechController;
+    const effects = {
+      setHighlight: vi.fn(),
+      clearHighlight: vi.fn(),
+    };
+    let preferredLanguage: string | null = null;
+    const reading = new ReadingController(
+      DEFAULT_CONFIG,
+      speech,
+      effects as unknown as PageEffectsController,
+      readingState(() => preferredLanguage),
+      {
+        isRegionContainer: () => false,
+        isTabSpeechTarget: () => false,
+      },
+    );
+    const target = get("language-target");
+
+    reading.speakElement(target);
+    expect(speak).toHaveBeenLastCalledWith(
+      "按钮，Hello world",
+      "en-US",
+      1,
+      expect.any(Object),
+    );
+
+    target.removeAttribute("lang");
+    reading.speakElement(target);
+    expect(speak).toHaveBeenLastCalledWith(
+      "按钮，Hello world",
+      "ja-JP",
+      1,
+      expect.any(Object),
+    );
+
+    get("language-parent").removeAttribute("lang");
+    preferredLanguage = "fr_fr";
+    reading.speakElement(target);
+    expect(speak).toHaveBeenLastCalledWith(
+      "按钮，Hello world",
+      "fr-FR",
+      1,
+      expect.any(Object),
+    );
+
+    preferredLanguage = null;
+    reading.speakElement(target);
+    expect(speak).toHaveBeenLastCalledWith(
+      "按钮，Hello world",
+      "en-US",
+      1,
+      expect.any(Object),
+    );
+  });
+
+  it("uses an updated project locale for the next ambiguous request", () => {
+    document.documentElement.removeAttribute("lang");
+    document.body.innerHTML = `<button id="locale-target">中文AB</button>`;
+    const speak = vi.fn();
+    const speech = {
+      speak,
+      cancel: vi.fn(),
+    } as unknown as SpeechController;
+    const effects = {
+      setHighlight: vi.fn(),
+      clearHighlight: vi.fn(),
+    };
+    const reading = new ReadingController(
+      mergeConfig(DEFAULT_CONFIG, { locale: "de-DE" }),
+      speech,
+      effects as unknown as PageEffectsController,
+      readingState(),
+      {
+        isRegionContainer: () => false,
+        isTabSpeechTarget: () => false,
+      },
+    );
+    const target = get("locale-target");
+
+    reading.speakElement(target);
+    expect(speak).toHaveBeenLastCalledWith(
+      "按钮，中文AB",
+      "de-DE",
+      1,
+      expect.any(Object),
+    );
+
+    reading.updateConfig(mergeConfig(DEFAULT_CONFIG, { locale: "fr-FR" }));
+    reading.speakElement(target);
+    expect(speak).toHaveBeenLastCalledWith(
+      "按钮，中文AB",
+      "fr-FR",
+      1,
+      expect.any(Object),
+    );
   });
 
   it.each(["reading-first", "region-first"] as const)(
@@ -82,7 +238,7 @@ describe("ReadingController region focus coordination", () => {
         DEFAULT_CONFIG,
         speech,
         effects as unknown as PageEffectsController,
-        { isEnabled: () => true, getRate: () => 1 },
+        readingState(),
         {
           isRegionContainer: (element) =>
             regionNavigation.isRegionContainer(element),
@@ -172,7 +328,7 @@ describe("ReadingController region focus coordination", () => {
         DEFAULT_CONFIG,
         speech,
         effects as unknown as PageEffectsController,
-        { isEnabled: () => true, getRate: () => 1 },
+        readingState(),
         {
           isRegionContainer: () => false,
           isTabSpeechTarget: (element) => tabs.isTabSpeechTarget(element),
@@ -281,7 +437,7 @@ describe("ReadingController region focus coordination", () => {
         DEFAULT_CONFIG,
         speech,
         effects as unknown as PageEffectsController,
-        { isEnabled: () => true, getRate: () => 1 },
+        readingState(),
         {
           isRegionContainer: () => false,
           isTabSpeechTarget: (element) => tabs.isTabSpeechTarget(element),
@@ -365,7 +521,7 @@ describe("ReadingController region focus coordination", () => {
         DEFAULT_CONFIG,
         speech,
         effects as unknown as PageEffectsController,
-        { isEnabled: () => true, getRate: () => 1 },
+        readingState(),
         {
           isRegionContainer: () => false,
           isTabSpeechTarget: (element) => tabs.isTabSpeechTarget(element),
@@ -421,4 +577,18 @@ function key(value: string, options: KeyboardEventInit = {}): KeyboardEvent {
 
 async function frame(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 25));
+}
+
+function readingState(
+  getPreferredLanguage: () => string | null = () => null,
+): {
+  isEnabled: () => boolean;
+  getRate: () => number;
+  getPreferredLanguage: () => string | null;
+} {
+  return {
+    isEnabled: () => true,
+    getRate: () => 1,
+    getPreferredLanguage,
+  };
 }

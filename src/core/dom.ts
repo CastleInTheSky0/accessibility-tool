@@ -69,14 +69,14 @@ export function isVisible(element: Element): boolean {
   if (!isHTMLElement(element) || !element.isConnected) {
     return false;
   }
-  if (
-    element.hidden ||
-    element.closest("[hidden], [inert], [aria-hidden='true']")
-  ) {
-    return false;
-  }
   let current: HTMLElement | null = element;
   while (current) {
+    if (
+      current.hidden ||
+      current.closest("[hidden], [inert], [aria-hidden='true']")
+    ) {
+      return false;
+    }
     const view: Window | null = current.ownerDocument.defaultView;
     const style = view?.getComputedStyle(current);
     if (
@@ -95,9 +95,53 @@ export function isVisible(element: Element): boolean {
     const shadowHost: Element | null = isShadowRootNode(rootNode)
       ? rootNode.host
       : null;
-    current = isHTMLElement(shadowHost) ? shadowHost : null;
+    if (isHTMLElement(shadowHost)) {
+      current = shadowHost;
+      continue;
+    }
+    if (rootNode.nodeType === Node.DOCUMENT_NODE) {
+      try {
+        const frameElement = (rootNode as Document).defaultView?.frameElement;
+        current = isHTMLElement(frameElement) ? frameElement : null;
+        continue;
+      } catch {
+        return false;
+      }
+    }
+    current = null;
   }
   return true;
+}
+
+export function getDeepActiveElement(
+  root: Document | ShadowRoot,
+): HTMLElement | null {
+  let activeElement: Element | null = root.activeElement;
+  while (activeElement) {
+    if (!isHTMLElement(activeElement)) {
+      return null;
+    }
+    const shadowActiveElement = activeElement.shadowRoot?.activeElement;
+    if (isHTMLElement(shadowActiveElement)) {
+      activeElement = shadowActiveElement;
+      continue;
+    }
+    if (activeElement.tagName === "IFRAME") {
+      try {
+        const frameActiveElement = (
+          activeElement as HTMLIFrameElement
+        ).contentDocument?.activeElement;
+        if (isHTMLElement(frameActiveElement)) {
+          activeElement = frameActiveElement;
+          continue;
+        }
+      } catch {
+        // Cross-origin frames stay atomic and are not inspected.
+      }
+    }
+    return activeElement as HTMLElement;
+  }
+  return null;
 }
 
 export function getFocusableElements(root: ParentNode): HTMLElement[] {
@@ -140,7 +184,8 @@ export function shouldIgnoreReadingTarget(
     element.closest(`[${TOOL_HOST_ATTRIBUTE}]`) ||
     element.closest("[data-a11y-ignore]") ||
     element.closest("script, style, template") ||
-    element.matches("input[type='password']")
+    element.matches("input[type='password']") ||
+    hasSensitiveAutocomplete(element)
   ) {
     return true;
   }
@@ -153,15 +198,131 @@ export function shouldIgnoreReadingTarget(
   });
 }
 
-export function getAccessibleText(element: HTMLElement): string {
-  const name = getAccessibleName(element);
+interface AccessibleTextOptions {
+  isReferenceAllowed?: ((element: HTMLElement) => boolean) | undefined;
+}
+
+export function getAccessibleText(
+  element: HTMLElement,
+  options: AccessibleTextOptions = {},
+): string {
+  const name = getAccessibleName(element, options);
   const text = formatElementSpeech(element, name);
   return appendElementState(element, text);
 }
 
+function hasSensitiveAutocomplete(element: HTMLElement): boolean {
+  const labelControl =
+    element.tagName === "LABEL"
+      ? ((element as HTMLLabelElement).control ??
+        element.querySelector<HTMLElement>("input, select, textarea"))
+      : null;
+  const candidates = [
+    element.closest<HTMLElement>("[autocomplete]"),
+    labelControl,
+  ];
+  return candidates.some((candidate) =>
+    (candidate?.getAttribute("autocomplete") ?? "")
+      .trim()
+      .toLowerCase()
+      .split(/\s+/)
+      .some(
+        (token) => token.startsWith("cc-") || token === "one-time-code",
+      ),
+  );
+}
+
+export function getContinuousAccessibleText(
+  element: HTMLElement,
+  options: AccessibleTextOptions = {},
+): string {
+  if (!isEditableTextElement(element)) {
+    if (getElementSpeechKind(element) === "select") {
+      const name = appendMissingText(
+        getAccessibleName(element, options),
+        getCurrentOptionText(element, options.isReferenceAllowed),
+      );
+      return appendElementState(element, formatElementSpeech(element, name));
+    }
+    return getAccessibleText(element, options);
+  }
+  const name = getAccessibleName(element, {
+    includeEditableValue: false,
+    includeDescription: true,
+    includeSelection: false,
+    textFallback: false,
+    isReferenceAllowed: options.isReferenceAllowed,
+  });
+  const continuousName = appendMissingText(
+    name,
+    element.getAttribute("aria-placeholder") ||
+      element.getAttribute("placeholder") ||
+      "",
+    getReferencedText(
+      element,
+      "aria-describedby",
+      options.isReferenceAllowed,
+    ),
+  );
+  return appendElementState(
+    element,
+    formatElementSpeech(element, continuousName),
+  );
+}
+
+export function getContinuousReferencedElements(
+  element: HTMLElement,
+  isReferenceAllowed?: (element: HTMLElement) => boolean,
+): readonly HTMLElement[] {
+  const references: HTMLElement[] = [];
+  const hasDirectName = [
+    "data-a11y-label",
+    "aria-readlabel",
+    "aria-label",
+  ].some((attribute) => Boolean(element.getAttribute(attribute)?.trim()));
+  if (!hasDirectName) {
+    const labelledBy = getReferencedElements(
+      element,
+      "aria-labelledby",
+      isReferenceAllowed,
+    ).filter((reference) =>
+      Boolean(getElementText(reference, isReferenceAllowed)),
+    );
+    if (labelledBy.length > 0) {
+      references.push(...labelledBy);
+    }
+  }
+  if (isEditableTextElement(element)) {
+    references.push(
+      ...getReferencedElements(element, "aria-describedby").filter(
+        (reference) =>
+          (isReferenceAllowed?.(reference) ?? true) &&
+          Boolean(getElementText(reference, isReferenceAllowed)),
+      ),
+    );
+  }
+  if (getElementSpeechKind(element) === "select") {
+    const currentOption = getCurrentOptionElement(
+      element,
+      isReferenceAllowed,
+    );
+    if (currentOption && currentOption !== element) {
+      references.push(currentOption);
+    }
+  }
+  return Array.from(new Set(references));
+}
+
 export function getAccessibleName(
   element: HTMLElement,
-  options: { readingFallbacks?: boolean } = {},
+  options: {
+    readingFallbacks?: boolean;
+    includeEditableValue?: boolean;
+    includeDescription?: boolean;
+    includeSelection?: boolean;
+    textFallback?: boolean;
+    isReferenceAllowed?: ((element: HTMLElement) => boolean) | undefined;
+  } = {},
 ): string {
   for (const attribute of [
     "data-a11y-label",
@@ -176,11 +337,11 @@ export function getAccessibleName(
 
   const labelledBy = element.getAttribute("aria-labelledby");
   if (labelledBy) {
-    const root = element.getRootNode();
-    const text = labelledBy
-      .split(/\s+/)
-      .map((id) => getElementById(root, id)?.textContent ?? "")
-      .join(" ");
+    const text = getReferencedText(
+      element,
+      "aria-labelledby",
+      options.isReferenceAllowed,
+    );
     if (text.trim()) {
       return normalizeText(text);
     }
@@ -205,21 +366,36 @@ export function getAccessibleName(
       }
     }
 
-    const formText = getFormText(element);
+    const formText = getFormText(
+      element,
+      options.includeEditableValue !== false,
+      options.includeDescription === true,
+      options.isReferenceAllowed,
+    );
     if (formText) {
       return formText;
     }
 
-    const selection = getSelectedTextWithin(element);
-    if (selection) {
-      return selection;
+    if (options.includeSelection !== false) {
+      const selection = getSelectedTextWithin(element);
+      if (selection) {
+        return selection;
+      }
     }
   }
 
-  return normalizeText(element.innerText || element.textContent || "");
+  if (options.textFallback === false) {
+    return "";
+  }
+  return getElementText(element, options.isReferenceAllowed);
 }
 
-function getFormText(element: HTMLElement): string {
+function getFormText(
+  element: HTMLElement,
+  includeEditableValue = true,
+  includeDescription = false,
+  isReferenceAllowed?: (element: HTMLElement) => boolean,
+): string {
   if (["INPUT", "TEXTAREA", "SELECT"].includes(element.tagName)) {
     const field = element as
       | HTMLInputElement
@@ -229,7 +405,8 @@ function getFormText(element: HTMLElement): string {
       ? Array.from(
           new Set(
             Array.from(field.labels)
-              .map((label) => normalizeText(label.textContent ?? ""))
+              .filter((label) => isReferenceAllowed?.(label) ?? true)
+              .map((label) => getElementText(label, isReferenceAllowed))
               .filter(Boolean),
           ),
         ).join(" ")
@@ -239,17 +416,31 @@ function getFormText(element: HTMLElement): string {
       fieldType === "checkbox" || fieldType === "radio"
         ? ""
         : element.tagName === "SELECT"
-          ? (element as HTMLSelectElement).selectedOptions[0]?.textContent ?? ""
-          : field.value || element.getAttribute("placeholder") || "";
-    return normalizeText(`${labelText} ${value}`);
+          ? getCurrentOptionText(element, isReferenceAllowed)
+          : includeEditableValue
+            ? field.value || element.getAttribute("placeholder") || ""
+            : element.getAttribute("placeholder") || "";
+    const description = includeDescription
+      ? getReferencedText(
+          element,
+          "aria-describedby",
+          isReferenceAllowed,
+        )
+      : "";
+    return normalizeText(`${labelText} ${value} ${description}`);
   }
 
   const speechKind = getElementSpeechKind(element);
   if (speechKind === "textbox") {
+    const description = includeDescription
+      ? getReferencedText(
+          element,
+          "aria-describedby",
+          isReferenceAllowed,
+        )
+      : "";
     return normalizeText(
-      element.getAttribute("aria-placeholder") ||
-        element.getAttribute("placeholder") ||
-        "",
+      `${element.getAttribute("aria-placeholder") || element.getAttribute("placeholder") || ""} ${description}`,
     );
   }
 
@@ -257,13 +448,43 @@ function getFormText(element: HTMLElement): string {
     return "";
   }
 
+  return getCurrentOptionText(element, isReferenceAllowed);
+}
+
+function getCurrentOptionText(
+  element: HTMLElement,
+  isReferenceAllowed?: (element: HTMLElement) => boolean,
+): string {
+  const currentOption = getCurrentOptionElement(element, isReferenceAllowed);
+  if (!currentOption) {
+    return "";
+  }
+  return element.tagName === "SELECT"
+    ? getElementText(currentOption, isReferenceAllowed)
+    : getAccessibleName(currentOption, { isReferenceAllowed });
+}
+
+function getCurrentOptionElement(
+  element: HTMLElement,
+  isReferenceAllowed?: (element: HTMLElement) => boolean,
+): HTMLElement | null {
+  if (element.tagName === "SELECT") {
+    const selectedOption = (element as HTMLSelectElement).selectedOptions[0];
+    return selectedOption && (isReferenceAllowed?.(selectedOption) ?? true)
+      ? selectedOption
+      : null;
+  }
+
   const root = element.getRootNode();
   const activeId = element.getAttribute("aria-activedescendant")?.trim();
   const activeOption = activeId ? getElementById(root, activeId) : null;
-  if (activeOption && activeOption !== element) {
-    const activeName = getAccessibleName(activeOption);
-    if (activeName) {
-      return activeName;
+  if (
+    activeOption &&
+    activeOption !== element &&
+    (isReferenceAllowed?.(activeOption) ?? true)
+  ) {
+    if (getAccessibleName(activeOption, { isReferenceAllowed })) {
+      return activeOption;
     }
   }
 
@@ -271,9 +492,108 @@ function getFormText(element: HTMLElement): string {
     element.querySelectorAll<HTMLElement>("[role~='option']"),
   ).find(
     (option) =>
-      option.getAttribute("aria-selected")?.trim().toLowerCase() === "true",
+      option.getAttribute("aria-selected")?.trim().toLowerCase() === "true" &&
+      (isReferenceAllowed?.(option) ?? true),
   );
-  return selectedOption ? getAccessibleName(selectedOption) : "";
+  return selectedOption ?? null;
+}
+
+function getReferencedText(
+  element: HTMLElement,
+  attribute: string,
+  isReferenceAllowed?: (element: HTMLElement) => boolean,
+): string {
+  return normalizeText(
+    getReferencedElements(element, attribute, isReferenceAllowed)
+      .map((reference) => getElementText(reference, isReferenceAllowed))
+      .join(" "),
+  );
+}
+
+function getReferencedElements(
+  element: HTMLElement,
+  attribute: string,
+  isReferenceAllowed?: (element: HTMLElement) => boolean,
+): HTMLElement[] {
+  const references = element.getAttribute(attribute)?.trim();
+  if (!references) {
+    return [];
+  }
+  const root = element.getRootNode();
+  return references
+    .split(/\s+/)
+    .map((id) => getElementById(root, id))
+    .filter(
+      (reference): reference is HTMLElement =>
+        reference !== null && (isReferenceAllowed?.(reference) ?? true),
+    );
+}
+
+function getElementText(
+  element: HTMLElement,
+  isReferenceAllowed?: (element: HTMLElement) => boolean,
+): string {
+  if (!isReferenceAllowed) {
+    return normalizeText(element.innerText || element.textContent || "");
+  }
+  const parts: string[] = [];
+  const visit = (node: Node): void => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      parts.push(node.textContent ?? "");
+      return;
+    }
+    if (isHTMLElement(node) && !isReferenceAllowed(node)) {
+      return;
+    }
+    for (const child of Array.from(node.childNodes)) {
+      visit(child);
+    }
+  };
+  visit(element);
+  return normalizeText(parts.join(" "));
+}
+
+function appendMissingText(value: string, ...details: string[]): string {
+  let result = normalizeText(value);
+  for (const detail of details.map(normalizeText).filter(Boolean)) {
+    if (!result.includes(detail)) {
+      result = normalizeText(`${result} ${detail}`);
+    }
+  }
+  return result;
+}
+
+function isEditableTextElement(element: HTMLElement): boolean {
+  if (element.tagName === "INPUT") {
+    const input = element as HTMLInputElement;
+    const type = input.type.toLowerCase();
+    return (
+      !input.readOnly &&
+      ![
+        "button",
+        "checkbox",
+        "color",
+        "file",
+        "hidden",
+        "image",
+        "radio",
+        "range",
+        "reset",
+        "submit",
+      ].includes(type)
+    );
+  }
+  if (element.tagName === "TEXTAREA") {
+    return !(element as HTMLTextAreaElement).readOnly;
+  }
+  if (element.isContentEditable) {
+    return true;
+  }
+  const role = element.getAttribute("role")?.trim().split(/\s+/)[0];
+  return (
+    ["textbox", "searchbox", "spinbutton"].includes(role ?? "") &&
+    element.getAttribute("aria-readonly") !== "true"
+  );
 }
 
 function formatElementSpeech(element: HTMLElement, name: string): string {
@@ -392,22 +712,17 @@ function getSelectedTextWithin(element: HTMLElement): string {
   return "";
 }
 
-export function getElementLanguage(element: Element): string {
-  return (
-    element.closest<HTMLElement>("[lang]")?.lang ||
-    element.ownerDocument.documentElement.lang ||
-    "zh-CN"
-  );
-}
-
 export function normalizeText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
-export function createUniqueId(prefix: string, documentRef = document): string {
+export function createUniqueId(
+  prefix: string,
+  root: Document | ShadowRoot = document,
+): string {
   const id = `${prefix}-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
-  return documentRef.getElementById(id)
-    ? createUniqueId(prefix, documentRef)
+  return root.getElementById(id)
+    ? createUniqueId(prefix, root)
     : id;
 }
 

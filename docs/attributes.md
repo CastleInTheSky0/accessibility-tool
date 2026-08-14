@@ -11,6 +11,8 @@
 | `5` | `list` | 列表区 |
 | `6` | `content` | 正文区 |
 
+HTML 属性方式继续兼容表中的数字和英文值；`registerRegions()` / `registerTabs()` 的 TypeScript `RegionCode` 只接受数字 `1`～`6`，并始终向 DOM 写入数字值。
+
 推荐写法：
 
 ```html
@@ -85,6 +87,27 @@ AccessibilityTool.configure({
 <section data-a11y-ignore>不会扫描或朗读</section>
 ```
 
+## 页面朗读语言标记
+
+接入页面应优先使用标准 HTML `lang` 标记真实内容语言。工具按“当前元素 → 最近组合树祖先 → 当前文档根元素”的顺序读取显式标记，再进入本地偏好、文本检测和项目默认语言回退。
+
+```html
+<html lang="zh-CN">
+  <article>
+    <p>中文正文</p>
+    <blockquote lang="en-US">English quotation</blockquote>
+  </article>
+</html>
+```
+
+- 推荐使用标准 BCP 47 标签，例如 `zh-CN`、`zh-Hant`、`en-US`、`ja-JP`、`ko-KR`。
+- 工具会兼容 `en_US` 等下划线写法并规范化大小写，但新页面仍应使用标准连字符。
+- 空值、非法标签、`und` 和 `zxx` 会被视为没有可用语言，并继续下一级回退。
+- open Shadow Root 内部节点可以继承 Shadow Root 内祖先或 host 的 `lang`。关闭式 Shadow Root 仍受原有发现边界限制。
+- 同源 iframe 内节点读取 iframe 自己的 `document.documentElement.lang`；不会使用外层文档语言覆盖。跨域 iframe 仍不可读取。
+- 动态修改节点／祖先的 `lang`，或把节点移动到另一语言祖先后，下一次朗读会重新解析，不需要刷新工具。
+- 混合文本的一次语音请求只使用一个语言。没有显式标记时，主导脚本不足 60% 会回退项目 `locale`；纯汉字日文无法可靠区分，必须显式使用 `lang="ja"`。
+
 ## 选项卡属性
 
 标准关联必须使用 `aria-controls` 与 ID：
@@ -133,18 +156,31 @@ AccessibilityTool.configure({
 
 `data-a11y-activation` 与 `data-a11y-trigger-event` 只从各自的 `role="tab"` 选项节点读取，`role="tablist"` 仅用于标准分组和 `aria-orientation` 方向语义。
 
+通过 `registerTabs()` 注册时，工具自动生成同一套标准属性。API 直接接收扁平配置，不接收 `tablist`；字符串 tab/panel 目标可分别匹配多个节点，数量相等且大于零时按 DOM 顺序索引配对。每个 tab 的直接父节点自动获得 `role="tablist"`，跨多个直接父节点时自动拆组。工具给每对 tab 和 panel 写入相同的数字 `data-a11y-region`；注册 tab 上的值只用于选项朗读分类，扫描器不会把该 tab 重复计为独立区域。手写 HTML 时仍推荐只在需要进入盲道导航的 panel 上声明区域，避免改变既有页面的区域数量。
+
 - 面板区域分类必须由接入方显式添加；工具不会因为存在 `role="tabpanel"` 就自动推测分类，`regions.autoDetect: false` 也不会关闭显式分类。
 - 面板未提供 `data-a11y-label` 时，工具通过 `aria-labelledby` / `aria-controls` 关系使用来源选项名称；面板自己的显式名称仍有更高优先级。
 - 激活模式未声明或不是 `automatic` / `manual` 时，回退到 `tabs.defaultActivation`。
 - 触发事件未声明或为空时，回退到 `tabs.triggerEvents`；配置仍为空时最终使用 `click`。
 - 多个事件使用空格分隔并自动去重，因此不同选项可以分别触发不同的页面原有事件。
 - 页面原有事件负责在普通 `role="tabpanel"` 或非原生浮层上添加、移除布尔属性 `data-a11y-hidden`，不要在这些宿主面板上直接使用原生 `hidden`。
-- 工具只触发页面原事件并同步 `aria-selected` / `aria-hidden`，不直接写入 `data-a11y-hidden` 或控制业务视觉样式；`aria-hidden` 不能替代显隐属性，`data-a11y-hidden` 也不能替代无障碍状态。
+- 现有 HTML 属性接入中，tabs controller 只触发页面原事件并同步 `aria-selected` / `aria-hidden`，不替代业务视觉状态。`registerTabs()` 会用 `data-a11y-hidden` 初始化注册组的非活动面板并在注销时恢复原值；后续切换仍由配置的原页面事件和 CSS 负责。
+- `aria-hidden` 不能替代显隐属性，`data-a11y-hidden` 也不能替代无障碍状态。注册 API 从不新增、删除或修改接入页面原有的 `hidden` 属性。
 - 原生 `<dialog>` 不使用 `data-a11y-hidden`，继续由页面通过 `showModal()`、`open` 和 `close()` 控制。
-- 每个有效 `role="tab"` 获得焦点时只朗读一次完整提示：普通选项为 `Tab，{名称}，{区域分类}，当前有浮动窗口，按 ALT+下键进入窗口`，带 `href` 的 `<a role="tab">` 为 `链接：{名称}，Tab，{区域分类}，当前有浮动窗口，按 ALT+下键进入窗口`。区域分类只取关联面板自身扫描到的显式六类分类，不回退到选项或面板的外层区域；关联面板未显式分类时省略该片段。不要在选项上重复添加区域属性，选项不会作为独立盲道区域计数。
+- 每个有效 `role="tab"` 获得焦点时只朗读一次完整提示：普通选项为 `Tab，{名称}，{区域分类}，当前有浮动窗口，按 ALT+下键进入窗口`，带 `href` 的 `<a role="tab">` 为 `链接：{名称}，Tab，{区域分类}，当前有浮动窗口，按 ALT+下键进入窗口`。区域分类只取关联面板自身扫描到的显式六类分类，不回退到选项或面板的外层区域；关联面板未显式分类时省略该片段。手写 HTML 时不要在选项上重复添加区域属性；`registerTabs()` 虽会按 API 协议给选项写入相同区域数字，但扫描器不会将它计为独立盲道区域。
 - 显式标记的隐藏面板仍参与区域数量和分类循环；分类快捷键或工具栏按钮命中时，工具复用来源选项的触发事件，等待页面显示成功后才添加可逆区域 Tab 锚点、聚焦并朗读。超时、停止或较新的导航使请求过期时，不切换当前区域，也不朗读成功提示。
 - Alt+下进入关联面板时使用面板自身的显式区域分类，朗读来源选项、Tab 遍历和 Esc 返回方法；该次聚焦抑制通用区域进入播报，因此只朗读一次。面板没有可通过 Tab 聚焦的后代时改为提示“当前面板暂无可通过 Tab 遍历的信息”，不会给静态内容增加 `tabindex`。
 - Esc 只有在面板成功退出并将焦点返回来源选项后才朗读 `已返回{名称}选项`；返回失败时不朗读成功提示。
+
+## JavaScript 注册生成的属性与恢复
+
+`registerRegions()` 写入 `data-a11y-region`，提供 `label` 时同时写入 `data-a11y-label`。`registerTabs()` 还会可逆地补充：
+
+- tab 的直接父节点：`role="tablist"`
+- tab：`role="tab"`、`id`、`tabindex`、`aria-controls`、`aria-selected`、`data-a11y-region`、`data-a11y-label`、`data-a11y-activation`、`data-a11y-trigger-event`
+- panel：`role="tabpanel"`、`id`、`aria-labelledby`、`aria-hidden`、`data-a11y-region`、`data-a11y-label`、必要的 `data-a11y-hidden`
+
+每个 `RegistrationHandle.dispose()` 只恢复本次调用拥有的层级；其他仍有效注册继续生效。最后一个所有者释放后恢复注册前的精确属性三态。`AccessibilityTool.destroy()` 会自动执行所有剩余恢复。tab/panel 选择器数量不一致时整项跳过并在 debug 模式警告；选择器只在调用时解析，未来新增或框架重建的节点不会自动注册。
 
 ## 对话框关闭钩子
 

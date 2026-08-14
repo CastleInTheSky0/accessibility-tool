@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 7
-- **Last Active**: 2026-08-05
+- **Total Sessions**: 11
+- **Last Active**: 2026-08-11
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~239 | Active |
+| `journal-1.md` | ~375 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,10 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 11 | 2026-08-11 | 完成连续朗读功能 | `cccbb55` | `feat/accessibility-tool-v0.2` |
+| 10 | 2026-08-06 | 完成浏览器本地音色选择 | `f6f9734`, `f957abf`, `495f313` | `feat/accessibility-tool-v0.2` |
+| 9 | 2026-08-05 | 完成前端自动语言检测 | `4168221`, `ef07f9b`, `3463bf9` | `feat/language-detection` |
+| 8 | 2026-08-05 | 完成 JavaScript 盲道区域注册任务 | `d45cf80` | `feat/dom-region-registration` |
 | 7 | 2026-08-05 | 完成无障碍工具一期验收与发布准备 | `6dc8304`, `be90efd` | `feat/accessibility-tool-v0.1` |
 | 6 | 2026-08-04 | 状态化图标与红色十字线 | `25a75d5` | `feat/accessibility-tool-v0.1` |
 | 5 | 2026-08-04 | 修复工具栏滚动吸顶与页面占位 | `576b0b2` | `feat/accessibility-tool-v0.1` |

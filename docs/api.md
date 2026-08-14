@@ -4,6 +4,8 @@
 
 ```ts
 AccessibilityTool.configure(config);
+const regions = AccessibilityTool.registerRegions(configs);
+const tabs = AccessibilityTool.registerTabs(configs);
 await AccessibilityTool.open({ trigger?, config? });
 await AccessibilityTool.close();
 await AccessibilityTool.toggle({ trigger?, config? });
@@ -20,6 +22,111 @@ AccessibilityTool.off(eventName, listener);
 站点级功能显隐和自定义语音适配器应在首次 `open()` 前配置；工具已经打开后修改这两类配置，将在下次关闭并重新打开时完整生效。主题、区域选择器等运行时配置可以即时刷新。
 
 自动恢复在 DOM ready 后读取最终站点配置，因此自定义 `storageKey` 应在 `DOMContentLoaded` 前通过 `configure()` 设置。显式 `open()` 成功后才写入打开意图；自动恢复失败或显式打开失败都会清理标记，避免后续页面重复失败。
+
+## JavaScript DOM 注册
+
+接入方不能直接修改原页面 HTML 时，可在目标节点已经存在后调用 `registerRegions()` 或 `registerTabs()`。两个方法都会立即写入现有属性协议；工具已经打开时同步刷新现有区域扫描，尚未打开时则在之后打开时识别。
+
+### 公共类型
+
+```ts
+type RegionCode = 1 | 2 | 3 | 4 | 5 | 6;
+type DomTarget = string | Element;
+
+interface RegistrationHandle {
+  dispose(): void;
+}
+
+interface RegionRegistrationConfig {
+  target: DomTarget;
+  region: RegionCode;
+  label?: string;
+}
+
+interface TabRegistrationItem {
+  tab: DomTarget;
+  panel: DomTarget;
+  region: RegionCode;
+  label?: string;
+  activation?: "automatic" | "manual";
+  triggerEvent?: string | readonly string[];
+}
+```
+
+| `RegionCode` | 区域分类 |
+| --- | --- |
+| `1` | 视窗区 |
+| `2` | 导航区 |
+| `3` | 交互区 |
+| `4` | 服务区 |
+| `5` | 列表区 |
+| `6` | 正文区 |
+
+JavaScript 注册 API 的 `region` 只接受上述数字，不接受英文区域名称。运行时收到其他值时只跳过该项，不影响同一次调用中的有效配置；`debug: true` 时输出明确警告。
+
+### `registerRegions()`
+
+```js
+const contentElement = document.querySelector("#content");
+
+const registration = AccessibilityTool.registerRegions([
+  {
+    target: "#news",
+    region: 1,
+    label: "要闻",
+  },
+  {
+    target: "#main-nav",
+    region: 2,
+    label: "主导航",
+  },
+  {
+    target: contentElement,
+    region: 6,
+    label: "新闻正文",
+  },
+]);
+
+// 注销本次调用，并恢复所有目标节点注册前的属性值。
+registration.dispose();
+```
+
+- 字符串按 `document.querySelectorAll()` 解析，同一选择器匹配的全部现有节点使用同一配置。
+- `Element` 只处理传入节点；断开节点或不属于有效文档的节点会被跳过。
+- `label` 只填写区域自身短名称，例如“要闻”，不要填写“要闻视窗区”或完整提示句。省略时继续使用现有可访问名称和标题回退规则。
+- API 写入数字形式的 `data-a11y-region`，并在提供 `label` 时写入 `data-a11y-label`；分类名称与完整朗读文案仍由现有扫描和导航模块生成。
+
+### `registerTabs()`
+
+```js
+const registration = AccessibilityTool.registerTabs([
+  {
+    tab: ".services-tab-hditem",
+    panel: ".services-tabcut-bdcontent",
+    region: 1,
+  },
+]);
+
+registration.dispose();
+```
+
+- `registerTabs()` 直接接收扁平的选项配置，不需要 `tablist` 或 `items` 包装层。
+- 字符串目标按 `document.querySelectorAll()` 解析。同一项的 tab 与 panel 有效匹配数量相等且大于零时，按各自 DOM 顺序和相同索引一一配对，因此多个组件复用相同类名时也只需配置一次。
+- tab/panel 数量不一致时整项跳过，其他配置继续注册；`debug: true` 时输出包含两侧数量的警告。`Element` 目标仍只表示单个现有节点。
+- 每个 tab 的直接父节点自动获得 `role="tablist"`。同一选择器命中多个组件时，会按不同直接父节点自动拆成多个独立 tablist；每组分别初始化首个选项，键盘移动与选中状态不会影响其他组。工具不猜测更外层祖先。
+- 每对 tab 与 panel 必须位于同一 `Document` 或 Shadow Root；重复 tab、重复 panel、tab/panel 跨角色复用、同一节点自配对，以及自动推断父节点与 tab/panel 的角色冲突，都只跳过冲突配对。仍在生效的注册也参与跨角色校验，相同角色的重叠注册则继续由属性所有权层安全处理。
+- 缺失 ID 时生成同一根节点内不冲突的临时 ID；已有唯一 ID 原样复用。临时 ID 和所有覆盖属性都在注销时恢复。
+- API 自动补充 `tablist` / `tab` / `tabpanel` role、`tabindex`、ARIA 关联与选中状态，并给 tab 和 panel 写入相同的数字区域。注册 tab 上的区域值只作为选项分类元数据，不会把选项重复计为第二个盲道区域。
+- `data-a11y-activation` 与 `data-a11y-trigger-event` 只写在对应 tab 上。省略时沿用当前 `tabs.defaultActivation`、`tabs.triggerEvents` 和最终 `click` 回退规则；多个事件会按现有规则拆分、去重。
+- `label` 是选项短名称覆盖值；省略时使用现有 tab 可访问名称提取逻辑。对应 panel 使用同一短名称和区域分类。
+- 初始非活动普通面板使用 `data-a11y-hidden`；原生 `<dialog>` 的该属性保持原样，并继续使用自身的 `open` / `close()`。注册过程不新增、删除或修改原生 `hidden`。接入页面原有事件与 CSS 仍负责真实视觉显示，工具继续只复用现有 tabs 事件、ARIA、键盘、Alt+下、Esc 和朗读流程。
+
+### 生命周期和动态 DOM 限制
+
+- 每次调用返回独立句柄；`dispose()` 幂等，只注销该次调用。多个注册覆盖同一属性时，释放其中一个不会破坏仍有效的注册。
+- 恢复会区分原本不存在、原本为空字符串和原本具有非空值的属性。
+- `close()` 不注销 DOM 注册，重新打开仍可识别；`destroy()` 会自动释放全部尚未 `dispose()` 的注册并恢复 DOM。
+- 首版只解析调用时已经存在的节点，不保存选择器等待未来节点。SPA 路由或框架重建 DOM 后，接入方需要重新调用相应注册方法。
 
 ## 顶层配置
 
@@ -38,6 +145,28 @@ AccessibilityTool.off(eventName, listener);
 | `tabs` | 见下表 | 标准选项卡和浮层增强 |
 | `colorExclusions` | `[]` | 不参与页面配色的 CSS 选择器 |
 
+`features` 支持这些稳定功能 ID：
+
+```ts
+type FeatureId =
+  | "reading"
+  | "continuousReading"
+  | "speechRate"
+  | "voiceSelection"
+  | "colorScheme"
+  | "zoomIn"
+  | "zoomOut"
+  | "largeCursor"
+  | "crosshair"
+  | "fullscreen"
+  | "largeCaption"
+  | "pin"
+  | "reset"
+  | "help"
+  | "readScreen"
+  | "exit";
+```
+
 ### 打开状态持久化
 
 - 打开意图使用 `${storageKey}:open-state` 独立存储，并有自己的版本字段；不会修改现有偏好 payload 或偏好版本。
@@ -50,6 +179,8 @@ AccessibilityTool.off(eventName, listener);
 - `localStorage` 不存在、损坏或被阻止时不会抛错；退化为当前页面内存，无法跨刷新恢复属于预期限制。
 
 ### `toolbar`
+
+桌面主工具栏固定为单排，功能顺序由内部常量保持稳定；完整主模式共有 16 个控件，其中“语速 → 音色 → 配色”和“大界面 → 大字幕 → 固定”的相对顺序固定。工具栏外层继续占满视口，品牌与控件共享的内部版心为 `width: 100%`、`max-width: 1280px`；1024～1279px 使用紧凑单排布局。
 
 | 字段 | 默认值 |
 | --- | --- |
@@ -79,6 +210,57 @@ interface SpeechAdapter {
 | `hoverDelayMs` | `500` |
 | `defaultRate` | `1` |
 | `ignoreSelectors` | `[]` |
+
+### 连续朗读
+
+- `features.continuousReading` 依赖 `features.reading`。主模式和读屏专用模式的“连续朗读”入口连接同一会话，并打开 Shadow DOM 内 anchored、非模态“连续朗读控制”面板。
+- 面板提供开始、暂停／继续和停止。Esc、关闭按钮或面板外操作只关闭面板，不停止仍在播放的会话；显式关闭后焦点返回当前连接的入口。
+- 开始前先检查可用输出。语音和大字幕都不可用时保持 `readingEnabled` 和连续状态不变；语音不可用但大字幕已开启时，以纯文字计时模式运行同一队列且不伪造 `speechstart` / `speechend`。当前范围为空时保持连续状态 `idle`，字幕模式不会反向开启音频朗读。
+- 默认起点依次为工具栏接管前最后一个有效页面目标、当前盲道区域首个有效段落、页面首个有效段落。自动推进不移动键盘焦点，只更新朗读高亮并在需要时滚动。
+- 每次启动冻结一个有限 composed-tree 队列，按页面顺序进入 open Shadow Root、slot 和同源 iframe；未标记正文也会参与。新插入的普通内容留到下次启动，已有成员在每段前重新解析当前文本、语言、语速和音色。
+- 当前有效 tab 控件作为原子项朗读；只有启动时可见的当前 panel 内容逐段进入队列，隐藏 panel 不会被读取或自动激活。模态 dialog 打开会停止背景会话；在 dialog 内重新开始时只读取最内层活动 dialog。
+- 自动遍历不朗读 editable 输入值。密码、验证码（含 `autocomplete="one-time-code"`）、支付字段、显式敏感内容、配置忽略项，以及被这些节点提供的 label、ARIA 名称、说明或当前选项文本都会被排除；单次主动聚焦／点击的普通 editable 朗读行为保持不变。
+- 音频段暂停时取消当前请求，继续后从该段开头重播；纯文字或音频失败回退段会冻结剩余计时，继续时从剩余时间恢复。用户页面交互、其他显式语音、音色试听、路由、dialog 和生命周期清理都会按对应原因结束会话；关闭朗读但保留大字幕时，当前段转为纯文字并继续。语速、默认语言、音色或重新开启音频从下一段生效，不重启当前纯文字段。
+- 所有段落继续经过唯一的输出协调器；真实音频仍使用 `SpeechController → SpeechAdapter`。自定义 adapter 的同步 `speak()` 异常只产生一次有效语音错误：有字幕时当前段转为纯文字，无字幕时才以 `error` 结束会话；`cancel()` 异常不会阻断暂停、停止或清理。连续朗读不保存或上传正文；开启字幕时只可能按需请求下述同目录语言分包。
+
+### 大字幕
+
+- `features.largeCaption` 控制主模式和读屏专用模式中的同一个“大字幕”开关。它独立于“朗读”：开启字幕不会开启音频，关闭音频也不会关闭字幕。
+- 默认偏好为关闭、`36px`、简体、拼音关闭；可选字号为 `28 / 36 / 48px`。这四个设置存入现有 version 1 偏好 payload，旧版 payload 缺少字段时安全采用默认值；当前或历史字幕正文永不进入存储、事件或日志。
+- 字幕固定铺满视口底部，最大高度约 `32vh`。控制区保持可见，正文区域独立纵向滚动，并使用可聚焦、具名的普通 `role="region"`；正文不使用 `aria-live`、`status` 或 `alert`，拼音注音对辅助技术隐藏，避免重复播报。
+- 简繁转换使用 `accessibility-tool-opencc.js` 中的 `opencc-js` 标准 `cn2t / t2cn`，拼音使用 `accessibility-tool-pinyin.js` 中的 `pinyin-pro` 带声调输出。两者始终从同一原文快照生成；异步加载期间先显示原文，迟到结果由渲染 generation 拦截，失败时保留原文或仅省略拼音，不改变语音输入。
+- 接入 HTML 仍只引用 `dist/accessibility-tool.min.js` 一次；主入口会从自身同目录首次按需 `import()` 上述两个固定文件名的 ESM 分包，初次 URL 带当前包版本 `?v=<version>`，成功后复用缓存，失败后的下一次操作保留版本并增加递增的 `retry` 参数。部署方必须复制完整 `dist`、保持三个 JS 同目录，并在升级时原子替换同一版本的三个文件，避免主入口与分包跨版本混用；不需要额外 `<script>` 标签、CDN 或第三方运行时字典。`dist/accessibility-tool.css` 只用于可选的严格 CSP 外链样式接入。
+- 有效音频只在匹配请求真正 `onStart` 后显示为“朗读中”。语音不可用或启动失败时显示“显示中”，按当前语速估算 `3–15s`；中途失败扣除已播放时间并至少保留 `1s`。正常结束显示“已结束”约 `3s`，暂停显示“已暂停”。旧回调和旧计时器不能覆盖新文本。
+- 显式“关闭大字幕”只关闭视觉输出并按当前入口、此前页面焦点、`body` 的顺序恢复焦点。自动结束、路由、重置、`close()` 或 `destroy()` 清理正文和计时器但不移动焦点。
+
+### 浏览器本地音色选择
+
+- 默认浏览器语音适配器启用时，“音色”按钮打开 Shadow DOM 内的非模态“语音设置”浮层。浮层可选择默认语言、自动选择或兼容的本地音色，并支持试听和清除语音偏好。
+- 音色目录立即调用 `speechSynthesis.getVoices()`，并监听 `voiceschanged` 处理浏览器异步加载。界面只显示 `localService === true` 的音色；远程音色不会显示，也不会被显式赋给 `SpeechSynthesisUtterance.voice`。
+- 音色按最终语言的精确标签、相同主语言排序。已保存音色优先按 `voiceURI` 恢复，再按 `name + 规范化 lang` 恢复；无法恢复时使用兼容的浏览器默认本地音色，最后保持 `utterance.voice` 未设置并交给浏览器按 `utterance.lang` 回退。
+- 偏好 payload 仍为 version 1，可选保存 `{ voiceURI, name, lang }`。原生 `SpeechSynthesisVoice` 对象不会写入存储；每次有效朗读和试听都会从最新 `getVoices()` 结果重新解析当前对象。
+- 试听使用当前语速和固定短句，并继续经过唯一的 `SpeechController`。再次试听会取消旧请求；关闭浮层、关闭工具、重置或销毁时会取消仍有效的试听并清理事件监听。
+- 配置自定义 `SpeechAdapter` 时，原有适配器调用和取消契约不变；语音设置浮层会明确说明浏览器本地音色不可用，且不会把浏览器 voice 对象传给自定义适配器。
+- 音色目录与播放之间存在未从包入口导出的内部能力边界，便于后续在另行批准后增加其他来源。该边界不是公共插件 API；v0.2 不读取服务地址、凭据或厂商配置，不包含云端 SDK，也不发起音色目录或音频网络请求。
+
+### 页面朗读语言解析
+
+页面元素朗读会在每次有效请求前重新解析语言，并把最终规范化后的 BCP 47 标签传给 `SpeechRequestOptions.lang`。固定优先级为：
+
+1. 当前目标元素自身的 `lang`
+2. 最近的组合树祖先元素 `lang`
+3. 目标所属 `document.documentElement.lang`
+4. 已保存的默认语言（可选偏好字段）
+5. 当前朗读文本的纯本地脚本特征
+6. `locale` 项目回退语言
+
+- `_` 会兼容转换为 `-`，并优先通过浏览器 `Intl` 规范化，例如 `en_US` → `en-US`、`ZH-hans-cn` → `zh-Hans-CN`。
+- 空值、非法值、`und` 和 `zxx` 会跳过，不会阻断朗读。
+- open Shadow Root 中会沿组合树继续检查 host；同源 iframe 只使用目标自己的文档语言，不跨到外层页面猜测。
+- 无显式标记和已保存偏好时，本地轻量检测可识别主导中文、英文、日文假名和韩文。至少需要 2 个强语言字符且主导组达到 60%；否则使用 `locale`。
+- `locale` 继续控制工具自身提示的语言，并作为页面内容的最终回退。宿主页面 `lang` 不会改写“朗读已开启”等工具内置提示。
+- “语音设置”中的默认语言选择会写入该可选偏好；选择“跟随页面与自动检测”或清除偏好会移除它。页面自身和祖先／文档 `lang` 仍保持更高优先级。
+- 检测同步在浏览器本地完成，不发起网络请求、不上传或保存朗读文本，也不新增运行时依赖。
 
 ### `zoom`
 
@@ -124,18 +306,70 @@ interface AccessibilityToolState {
   isCollapsed: boolean;
   isReadScreen: boolean;
   readingEnabled: boolean;
+  continuousReadingState: "idle" | "playing" | "paused";
   speechRate: number;
   colorScheme: ColorScheme;
   zoom: number;
   largeCursor: boolean;
   crosshair: boolean;
   isFullscreen: boolean;
+  captionEnabled: boolean;
+  captionFontSize: 28 | 36 | 48;
+  captionScript: "simplified" | "traditional";
+  captionPinyinEnabled: boolean;
 }
 ```
 
 ## 本地事件
 
-支持 `open`、`close`、`statechange`、`regionchange`、`speechstart`、`speechend` 和 `error`。
+支持 `open`、`close`、`statechange`、`regionchange`、`speechstart`、`speechend`、`error`，以及五个连续朗读会话事件。
+
+```ts
+type ContinuousReadingState = "idle" | "playing" | "paused";
+type ContinuousReadingScope = "page" | "dialog";
+type ContinuousReadingStopReason =
+  | "completed"
+  | "stopped"
+  | "interaction"
+  | "dialog"
+  | "route"
+  | "disabled"
+  | "lifecycle"
+  | "error";
+
+interface ContinuousReadingPosition {
+  index: number; // 从 1 开始，位于启动时冻结的候选队列中
+  count: number; // 启动时冻结的候选总数
+  textLength: number;
+}
+
+interface ContinuousReadingEvents {
+  continuousreadingstart: {
+    state: "playing";
+    scope: ContinuousReadingScope;
+    count: number;
+  };
+  continuousreadingsegmentchange: ContinuousReadingPosition & {
+    state: "playing";
+  };
+  continuousreadingpause: ContinuousReadingPosition & {
+    state: "paused";
+  };
+  continuousreadingresume: ContinuousReadingPosition & {
+    state: "playing";
+  };
+  continuousreadingstop: {
+    state: "idle";
+    reason: ContinuousReadingStopReason;
+    lastIndex: number | null;
+    count: number;
+  };
+}
+```
+
+`index`／`count` 描述启动时冻结的队列；运行中失效并被跳过的成员不会触发 `continuousreadingsegmentchange`，因此 `index` 可以跳号。公共 payload 不包含正文、Element、语言、区域标签或内部 generation；当前有效段落只在内部 reading provider 与输出协调器之间流转。
+
+音频首次有效启动的事件顺序为：必要的 `readingEnabled` `statechange` → `continuousReadingState="playing"` `statechange` → `continuousreadingstart` → 首段 `continuousreadingsegmentchange` → `speechstart`。无字幕回退时，有效错误顺序为唯一 `error` → idle `statechange` → reason=`error` 的 `continuousreadingstop`；字幕开启时，启动前或中途错误只发一次 `error` 并转纯文字，不伪造 `speechstart`／`speechend`，会话继续推进。取消或过期回调不会补发事件。
 
 ```js
 const onRegion = ({ type, index, count, label }) => {

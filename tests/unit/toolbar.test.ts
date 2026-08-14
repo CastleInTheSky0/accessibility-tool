@@ -9,6 +9,617 @@ import type {
 } from "../../src/types";
 
 describe("ToolbarUI", () => {
+  it("renders the confirmed 16-control main order and independent settings triggers", () => {
+    const { host, shadow, ui } = createToolbar();
+    ui.updateState(defaultState);
+
+    const actions = Array.from(
+      shadow.querySelectorAll<HTMLElement>(
+        '[data-mode="main"] [data-toolbar-item]',
+      ),
+    ).map((control) => control.dataset.action);
+    expect(actions).toEqual([
+      "reading",
+      "continuousReading",
+      "speechRate",
+      "voiceSelection",
+      "colorScheme",
+      "zoomIn",
+      "zoomOut",
+      "largeCursor",
+      "crosshair",
+      "fullscreen",
+      "largeCaption",
+      "pin",
+      "reset",
+      "help",
+      "readScreen",
+      "exit",
+    ]);
+
+    const voice = getControl(shadow, "voiceSelection");
+    expect(voice.getAttribute("aria-haspopup")).toBe("dialog");
+    expect(voice.getAttribute("aria-expanded")).toBe("false");
+    expect(voice.getAttribute("aria-controls")).toBe(`${host.id}-voice-settings`);
+    expect(shadow.querySelector(`#${host.id}-voice-settings`)?.getAttribute("role"))
+      .toBe("dialog");
+    expect(voice.hasAttribute("aria-pressed")).toBe(false);
+
+    const continuous = getControl(shadow, "continuousReading");
+    expect(continuous.getAttribute("aria-haspopup")).toBe("dialog");
+    expect(continuous.getAttribute("aria-expanded")).toBe("false");
+    expect(continuous.getAttribute("aria-controls")).toBe(
+      `${host.id}-continuous-reading-settings`,
+    );
+    expect(
+      shadow
+        .querySelector(`#${host.id}-continuous-reading-settings`)
+        ?.getAttribute("role"),
+    ).toBe("dialog");
+    expect(continuous.hasAttribute("aria-pressed")).toBe(false);
+
+    ui.destroy();
+    host.remove();
+  });
+
+  it("synchronizes large-caption state across the main and read-screen entries", () => {
+    const { host, shadow, ui } = createToolbar();
+    const [mainCaption, screenCaption] = getControls(shadow, "largeCaption");
+
+    expect(mainCaption).toBeDefined();
+    expect(screenCaption).toBeDefined();
+
+    ui.updateState(defaultState);
+    expect(mainCaption?.getAttribute("aria-pressed")).toBe("false");
+    expect(screenCaption?.getAttribute("aria-pressed")).toBe("false");
+
+    ui.updateState({
+      ...defaultState,
+      isReadScreen: true,
+      captionEnabled: true,
+    });
+    expect(mainCaption?.getAttribute("aria-pressed")).toBe("true");
+    expect(screenCaption?.getAttribute("aria-pressed")).toBe("true");
+    expect(mainCaption?.closest<HTMLElement>('[data-mode="main"]')?.hidden)
+      .toBe(true);
+    expect(screenCaption?.closest<HTMLElement>('[data-mode="screen"]')?.hidden)
+      .toBe(false);
+
+    ui.destroy();
+    host.remove();
+  });
+
+  it("keeps caption text non-live and synchronizes its preference controls", () => {
+    const onScriptChange = vi.fn();
+    const onPinyinChange = vi.fn();
+    const onFontSizeChange = vi.fn();
+    const { host, shadow, ui } = createToolbar(
+      mergeConfig(DEFAULT_CONFIG),
+      vi.fn(),
+      {
+        onCaptionScriptChange: onScriptChange,
+        onCaptionPinyinChange: onPinyinChange,
+        onCaptionFontSizeChange: onFontSizeChange,
+      },
+    );
+    ui.updateState(defaultState);
+    ui.showCaption({ text: "无障碍 Accessibility", status: "显示中" }, true);
+
+    const caption = shadow.querySelector<HTMLElement>(".a11y-large-caption");
+    const body = caption?.querySelector<HTMLElement>(
+      ".a11y-large-caption__body",
+    );
+    expect(caption?.hidden).toBe(false);
+    expect(body?.getAttribute("role")).toBe("region");
+    expect(body?.getAttribute("aria-label")).toBe("当前大字幕内容");
+    expect(caption?.hasAttribute("aria-label")).toBe(false);
+    expect(body?.hasAttribute("aria-live")).toBe(false);
+    expect(
+      body?.querySelector('[aria-live], [role="status"], [role="alert"]'),
+    ).toBeNull();
+
+    const simplified = caption?.querySelector<HTMLButtonElement>(
+      '[data-caption-script="simplified"]',
+    );
+    const traditional = caption?.querySelector<HTMLButtonElement>(
+      '[data-caption-script="traditional"]',
+    );
+    const pinyin = caption?.querySelector<HTMLButtonElement>(
+      "[data-caption-pinyin]",
+    );
+    const size28 = caption?.querySelector<HTMLButtonElement>(
+      '[data-caption-font-size="28"]',
+    );
+    const size36 = caption?.querySelector<HTMLButtonElement>(
+      '[data-caption-font-size="36"]',
+    );
+    const size48 = caption?.querySelector<HTMLButtonElement>(
+      '[data-caption-font-size="48"]',
+    );
+
+    expect(simplified?.getAttribute("aria-pressed")).toBe("true");
+    expect(traditional?.getAttribute("aria-pressed")).toBe("false");
+    expect(pinyin?.getAttribute("aria-pressed")).toBe("false");
+    expect(size28?.getAttribute("aria-pressed")).toBe("false");
+    expect(size36?.getAttribute("aria-pressed")).toBe("true");
+    expect(size48?.getAttribute("aria-pressed")).toBe("false");
+
+    traditional?.click();
+    simplified?.click();
+    pinyin?.click();
+    size28?.click();
+    size36?.click();
+    size48?.click();
+    expect(onScriptChange.mock.calls).toEqual([
+      ["traditional"],
+      ["simplified"],
+    ]);
+    expect(onPinyinChange).toHaveBeenCalledWith(true);
+    expect(onFontSizeChange.mock.calls).toEqual([[28], [36], [48]]);
+
+    ui.updateState({
+      ...defaultState,
+      captionScript: "traditional",
+      captionPinyinEnabled: true,
+      captionFontSize: 48,
+    });
+    expect(simplified?.getAttribute("aria-pressed")).toBe("false");
+    expect(traditional?.getAttribute("aria-pressed")).toBe("true");
+    expect(pinyin?.getAttribute("aria-pressed")).toBe("true");
+    expect(size28?.getAttribute("aria-pressed")).toBe("false");
+    expect(size36?.getAttribute("aria-pressed")).toBe("false");
+    expect(size48?.getAttribute("aria-pressed")).toBe("true");
+    expect(caption?.style.getPropertyValue("--a11y-caption-font-size")).toBe(
+      "48px",
+    );
+
+    pinyin?.click();
+    expect(onPinyinChange.mock.calls).toEqual([[true], [false]]);
+
+    ui.destroy();
+    host.remove();
+  });
+
+  it("renders untrusted caption content through text nodes in pinyin mode", async () => {
+    const { host, shadow, ui } = createToolbar();
+    const source =
+      '文本：<img src=x onerror="globalThis.captionInjected=true"> 汉字 & <script>坏</script>';
+    ui.updateState({
+      ...defaultState,
+      captionEnabled: true,
+      captionPinyinEnabled: true,
+    });
+    ui.showCaption({ text: source, status: "显示中" }, true);
+
+    const text = shadow.querySelector<HTMLElement>(
+      ".a11y-large-caption__text",
+    );
+    expect(text?.querySelector("img, script")).toBeNull();
+    await vi.waitFor(() => {
+      expect(
+        Array.from(
+          text?.querySelectorAll<HTMLElement>(
+            ".a11y-large-caption__written",
+          ) ?? [],
+        )
+          .map((node) => node.textContent ?? "")
+          .join(""),
+      ).toBe(source);
+    });
+    expect(text?.querySelector("img, script")).toBeNull();
+    expect(
+      (globalThis as typeof globalThis & { captionInjected?: boolean })
+        .captionInjected,
+    ).not.toBe(true);
+
+    ui.destroy();
+    host.remove();
+  });
+
+  it("returns focus to the visible large-caption entry after explicit close", () => {
+    const onCaptionClose = vi.fn();
+    const { host, shadow, ui } = createToolbar(
+      mergeConfig(DEFAULT_CONFIG),
+      vi.fn(),
+      { onCaptionClose },
+    );
+    ui.updateState({
+      ...defaultState,
+      isReadScreen: true,
+      captionEnabled: true,
+    });
+    ui.showCaption({ text: "当前字幕", status: "朗读中" }, true);
+
+    const [mainCaption, screenCaption] = getControls(shadow, "largeCaption");
+    const close = shadow.querySelector<HTMLButtonElement>(
+      ".a11y-large-caption__close",
+    );
+    expect(mainCaption?.closest<HTMLElement>('[data-mode="main"]')?.hidden)
+      .toBe(true);
+    expect(screenCaption?.closest<HTMLElement>('[data-mode="screen"]')?.hidden)
+      .toBe(false);
+
+    close?.focus();
+    close?.click();
+    expect(onCaptionClose).toHaveBeenCalledTimes(1);
+    expect(shadow.activeElement).toBe(screenCaption);
+
+    ui.destroy();
+    host.remove();
+  });
+
+  it("returns focus to the remembered page target when the toolbar is collapsed", () => {
+    const pageTarget = document.createElement("button");
+    pageTarget.textContent = "页面返回点";
+    document.body.append(pageTarget);
+    pageTarget.focus();
+    const onCaptionClose = vi.fn();
+    const { host, shadow, ui } = createToolbar(
+      mergeConfig(DEFAULT_CONFIG),
+      vi.fn(),
+      { onCaptionClose },
+    );
+    ui.updateState({
+      ...defaultState,
+      isPinned: true,
+      isCollapsed: true,
+      captionEnabled: true,
+    });
+    ui.showCaption({ text: "当前字幕", status: "显示中" }, true);
+
+    const close = shadow.querySelector<HTMLButtonElement>(
+      ".a11y-large-caption__close",
+    );
+    close?.focus();
+    close?.click();
+
+    expect(onCaptionClose).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(pageTarget);
+
+    ui.destroy();
+    host.remove();
+    pageTarget.remove();
+  });
+
+  it("operates the non-modal voice dialog and returns focus on Escape", () => {
+    const onLanguageChange = vi.fn();
+    const onVoiceChange = vi.fn();
+    const onVoicePreview = vi.fn();
+    const onVoiceClear = vi.fn();
+    const onVoiceSettingsClose = vi.fn();
+    const { host, shadow, ui } = createToolbar(
+      mergeConfig(DEFAULT_CONFIG),
+      vi.fn(),
+      {
+        onVoiceLanguageChange: onLanguageChange,
+        onVoiceChange,
+        onVoicePreview,
+        onVoiceClear,
+        onVoiceSettingsClose,
+      },
+    );
+    ui.updateState(defaultState);
+    ui.updateVoiceSettings({
+      availability: "browser-local",
+      catalogStatus: "ready",
+      preferredLanguage: "zh-CN",
+      effectiveLanguage: "zh-CN",
+      availableLanguages: ["fr-FR", "de-DE", "zh-CN", "fr-FR"],
+      voices: [
+        {
+          id: "uri:local:woman",
+          voiceURI: "local:woman",
+          name: "本地女声",
+          lang: "zh-CN",
+          isDefault: false,
+        },
+      ],
+      selectedVoiceId: "uri:local:woman",
+      summary: "本地女声",
+      statusMessage: "已找到 1 个兼容本地音色。",
+      hasPreferences: true,
+      previewEnabled: true,
+      isPreviewing: false,
+    });
+
+    const trigger = getControl(shadow, "voiceSelection");
+    ui.toggleVoiceSettings();
+    const dialog = shadow.querySelector<HTMLElement>(".a11y-voice-settings");
+    const language = dialog?.querySelector<HTMLSelectElement>("select");
+    expect(dialog?.hidden).toBe(false);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(shadow.activeElement).toBe(language);
+    expect(trigger.querySelector("[data-control-meta]")?.textContent).toBe(
+      "本地女声",
+    );
+    expect(
+      Array.from(language?.options ?? []).map((option) => option.value),
+    ).toEqual([
+      "",
+      "zh-CN",
+      "zh-TW",
+      "en-US",
+      "ja-JP",
+      "ko-KR",
+      "de-DE",
+      "fr-FR",
+    ]);
+
+    if (!language) {
+      throw new Error("Missing voice language selector");
+    }
+    language.value = "en-US";
+    language.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(onLanguageChange).toHaveBeenCalledWith("en-US");
+
+    const selected = dialog?.querySelector<HTMLInputElement>(
+      'input[type="radio"][value="uri:local:woman"]',
+    );
+    selected?.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(onVoiceChange).toHaveBeenCalledWith({
+      voiceURI: "local:woman",
+      name: "本地女声",
+      lang: "zh-CN",
+    });
+    dialog?.querySelector<HTMLButtonElement>(
+      ".a11y-voice-settings__button--primary",
+    )?.click();
+    dialog?.querySelector<HTMLButtonElement>(
+      ".a11y-voice-settings__button--secondary",
+    )?.click();
+    expect(onVoicePreview).toHaveBeenCalledTimes(1);
+    expect(onVoiceClear).toHaveBeenCalledTimes(1);
+
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+    expect(dialog?.hidden).toBe(true);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(shadow.activeElement).toBe(trigger);
+    expect(onVoiceSettingsClose).toHaveBeenCalledTimes(1);
+
+    ui.destroy();
+    host.remove();
+  });
+
+  it("operates one non-modal continuous-reading panel without stopping on close", () => {
+    const onStart = vi.fn();
+    const onPause = vi.fn();
+    const onResume = vi.fn();
+    const onStop = vi.fn();
+    const onClose = vi.fn();
+    const { host, shadow, ui } = createToolbar(
+      mergeConfig(DEFAULT_CONFIG),
+      vi.fn(),
+      {
+        onContinuousReadingStart: onStart,
+        onContinuousReadingPause: onPause,
+        onContinuousReadingResume: onResume,
+        onContinuousReadingStop: onStop,
+        onContinuousReadingSettingsClose: onClose,
+      },
+    );
+    ui.updateState(defaultState);
+    ui.updateContinuousReadingSettings({
+      state: "idle",
+      supported: true,
+      position: null,
+    });
+
+    const trigger = getControl(shadow, "continuousReading");
+    ui.toggleContinuousReadingSettings();
+    const panel = shadow.querySelector<HTMLElement>(
+      ".a11y-continuous-reading",
+    );
+    const start = panel?.querySelector<HTMLButtonElement>(
+      '[data-intent="start"]',
+    );
+    const pause = panel?.querySelector<HTMLButtonElement>(
+      '[data-intent="pause"]',
+    );
+    const stop = panel?.querySelector<HTMLButtonElement>(
+      '[data-intent="stop"]',
+    );
+    expect(panel?.hidden).toBe(false);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(shadow.activeElement).toBe(start);
+    start?.click();
+    expect(onStart).toHaveBeenCalledTimes(1);
+
+    ui.updateState({ ...defaultState, continuousReadingState: "playing" });
+    ui.updateContinuousReadingSettings({
+      state: "playing",
+      supported: true,
+      position: { index: 2, count: 6, textLength: 18 },
+    });
+    expect(start?.getAttribute("aria-disabled")).toBe("true");
+    expect(panel?.querySelector(".a11y-continuous-reading__status")?.textContent)
+      .toBe("正在朗读第 2 / 6 段");
+    pause?.click();
+    expect(onPause).toHaveBeenCalledTimes(1);
+
+    ui.updateState({ ...defaultState, continuousReadingState: "paused" });
+    ui.updateContinuousReadingSettings({
+      state: "paused",
+      supported: true,
+      position: { index: 2, count: 6, textLength: 18 },
+    });
+    const resume = panel?.querySelector<HTMLButtonElement>(
+      '[data-intent="resume"]',
+    );
+    expect(resume?.textContent).toBe("继续");
+    resume?.click();
+    expect(onResume).toHaveBeenCalledTimes(1);
+    stop?.click();
+    expect(onStop).toHaveBeenCalledTimes(1);
+
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+    expect(panel?.hidden).toBe(true);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(shadow.activeElement).toBe(trigger);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onStop).toHaveBeenCalledTimes(1);
+
+    ui.destroy();
+    host.remove();
+  });
+
+  it("keeps closed-shadow dialog interactions open and dismisses outside it", () => {
+    const onVoicePreview = vi.fn();
+    const onVoiceSettingsClose = vi.fn();
+    const { host, shadow, ui } = createToolbar(
+      mergeConfig(DEFAULT_CONFIG),
+      vi.fn(),
+      { onVoicePreview, onVoiceSettingsClose },
+      "closed",
+    );
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    ui.updateState(defaultState);
+    ui.updateVoiceSettings({
+      availability: "browser-local",
+      catalogStatus: "ready",
+      preferredLanguage: "zh-CN",
+      effectiveLanguage: "zh-CN",
+      availableLanguages: [],
+      voices: [],
+      selectedVoiceId: null,
+      summary: "自动选择",
+      statusMessage: "已找到兼容本地音色。",
+      hasPreferences: false,
+      previewEnabled: true,
+      isPreviewing: false,
+    });
+
+    ui.toggleVoiceSettings();
+    const dialog = shadow.querySelector<HTMLElement>(".a11y-voice-settings");
+    const preview = dialog?.querySelector<HTMLButtonElement>(
+      ".a11y-voice-settings__button--primary",
+    );
+    preview?.dispatchEvent(
+      new Event("pointerdown", { bubbles: true, composed: true }),
+    );
+    expect(dialog?.hidden).toBe(false);
+    preview?.click();
+    expect(onVoicePreview).toHaveBeenCalledTimes(1);
+
+    getControl(shadow, "reading").dispatchEvent(
+      new Event("pointerdown", { bubbles: true, composed: true }),
+    );
+    expect(dialog?.hidden).toBe(true);
+
+    ui.toggleVoiceSettings();
+    outside.dispatchEvent(
+      new Event("pointerdown", { bubbles: true, composed: true }),
+    );
+    expect(dialog?.hidden).toBe(true);
+    expect(onVoiceSettingsClose).toHaveBeenCalledTimes(2);
+
+    ui.destroy();
+    host.remove();
+    outside.remove();
+  });
+
+  it("preserves voice-radio focus across selection and catalog refreshes", () => {
+    const { host, shadow, ui } = createToolbar();
+    const firstVoice = {
+      id: "uri:local:first",
+      voiceURI: "local:first",
+      name: "本地女声",
+      lang: "zh-CN",
+      isDefault: false,
+    } as const;
+    const secondVoice = {
+      id: "uri:local:second",
+      voiceURI: "local:second",
+      name: "本地男声",
+      lang: "zh-CN",
+      isDefault: true,
+    } as const;
+    const baseModel = {
+      availability: "browser-local",
+      catalogStatus: "ready",
+      preferredLanguage: "zh-CN",
+      effectiveLanguage: "zh-CN",
+      availableLanguages: ["zh-CN"],
+      voices: [firstVoice, secondVoice],
+      selectedVoiceId: secondVoice.id,
+      summary: secondVoice.name,
+      statusMessage: "已找到 2 个兼容本地音色。",
+      hasPreferences: true,
+      previewEnabled: true,
+      isPreviewing: false,
+    } as const;
+    ui.updateState(defaultState);
+    ui.updateVoiceSettings(baseModel);
+    ui.toggleVoiceSettings();
+
+    const originalSecond = shadow.querySelector<HTMLInputElement>(
+      `input[type="radio"][value="${secondVoice.id}"]`,
+    );
+    originalSecond?.focus();
+    ui.updateVoiceSettings(baseModel);
+    const replacementSecond = shadow.querySelector<HTMLInputElement>(
+      `input[type="radio"][value="${secondVoice.id}"]`,
+    );
+    expect(replacementSecond).not.toBe(originalSecond);
+    expect(shadow.activeElement).toBe(replacementSecond);
+
+    ui.updateVoiceSettings({
+      ...baseModel,
+      voices: [firstVoice],
+      selectedVoiceId: null,
+      summary: "自动选择",
+    });
+    const automatic = shadow.querySelector<HTMLInputElement>(
+      'input[type="radio"][value=""]',
+    );
+    expect(automatic?.checked).toBe(true);
+    expect(shadow.activeElement).toBe(automatic);
+
+    ui.destroy();
+    host.remove();
+  });
+
+  it("explains when browser-local voice controls are unavailable for a custom adapter", () => {
+    const { host, shadow, ui } = createToolbar();
+    ui.updateState(defaultState);
+    ui.updateVoiceSettings({
+      availability: "custom-adapter",
+      catalogStatus: "unsupported",
+      preferredLanguage: null,
+      effectiveLanguage: "zh-CN",
+      availableLanguages: [],
+      voices: [],
+      selectedVoiceId: null,
+      summary: "自定义语音",
+      statusMessage: "当前站点使用自定义语音适配器，浏览器本地音色设置不可用。",
+      hasPreferences: false,
+      previewEnabled: false,
+      isPreviewing: false,
+    });
+
+    ui.toggleVoiceSettings();
+    const dialog = shadow.querySelector<HTMLElement>(".a11y-voice-settings");
+    expect(dialog?.hasAttribute("data-voice-settings-unavailable")).toBe(true);
+    expect(dialog?.querySelector('[role="status"]')?.textContent).toContain(
+      "自定义语音适配器",
+    );
+    expect(
+      dialog?.querySelector<HTMLButtonElement>(
+        ".a11y-voice-settings__button--primary",
+      )?.disabled,
+    ).toBe(true);
+    expect(
+      dialog?.querySelector<HTMLInputElement>('input[type="radio"]')?.disabled,
+    ).toBe(true);
+
+    ui.destroy();
+    host.remove();
+  });
+
   it("keeps the brand rail non-interactive and preserves screen-mode order", () => {
     const { host, shadow, ui } = createToolbar();
     ui.updateState({ ...defaultState, isReadScreen: true });
@@ -39,6 +650,8 @@ describe("ToolbarUI", () => {
       "region:list",
       "region:content",
       "screenSound",
+      "continuousReading",
+      "largeCaption",
       "help",
       "readScreen",
       "exit",
@@ -183,6 +796,8 @@ describe("ToolbarUI", () => {
       "region:service",
       "region:list",
       "region:content",
+      "continuousReading",
+      "largeCaption",
       "readScreen",
     ]);
     ui.destroy();
@@ -355,6 +970,7 @@ describe("ToolbarUI", () => {
     const expectedMeta = {
       reading: "开启",
       speechRate: "1.25×",
+      voiceSelection: "自动选择",
       colorScheme: "黑底黄字",
       zoomIn: "125%",
       zoomOut: "125%",
@@ -568,6 +1184,8 @@ describe("ToolbarUI", () => {
 function createToolbar(
   config = mergeConfig(DEFAULT_CONFIG),
   onCollapsedChange: (collapsed: boolean) => void = vi.fn(),
+  callbackOverrides: Partial<ConstructorParameters<typeof ToolbarUI>[3]> = {},
+  shadowMode: ShadowRootMode = "open",
 ): {
   host: HTMLDivElement;
   shadow: ShadowRoot;
@@ -575,10 +1193,11 @@ function createToolbar(
 } {
   const host = document.createElement("div");
   document.body.append(host);
-  const shadow = host.attachShadow({ mode: "open" });
+  const shadow = host.attachShadow({ mode: shadowMode });
   const ui = new ToolbarUI(host, shadow, config, {
     onAction: vi.fn(),
     onCollapsedChange,
+    ...callbackOverrides,
   });
   return { host, shadow, ui };
 }
@@ -646,6 +1265,11 @@ const defaultState: AccessibilityToolState = {
   isCollapsed: false,
   isReadScreen: false,
   readingEnabled: false,
+  continuousReadingState: "idle",
+  captionEnabled: false,
+  captionFontSize: 36,
+  captionScript: "simplified",
+  captionPinyinEnabled: false,
   speechRate: 1,
   colorScheme: "original",
   zoom: 1,

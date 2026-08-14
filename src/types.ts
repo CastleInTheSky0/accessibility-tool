@@ -6,6 +6,9 @@ export type RegionType =
   | "list"
   | "content";
 
+export type RegionCode = 1 | 2 | 3 | 4 | 5 | 6;
+export type DomTarget = string | Element;
+
 export type ColorScheme =
   | "original"
   | "white-black"
@@ -15,16 +18,40 @@ export type ColorScheme =
 
 export type ToolbarLayoutMode = "push" | "overlay";
 export type TabActivationMode = "automatic" | "manual";
+export type CaptionFontSize = 28 | 36 | 48;
+export type CaptionScript = "simplified" | "traditional";
+
+export interface RegistrationHandle {
+  dispose(): void;
+}
+
+export interface RegionRegistrationConfig {
+  target: DomTarget;
+  region: RegionCode;
+  label?: string;
+}
+
+export interface TabRegistrationItem {
+  tab: DomTarget;
+  panel: DomTarget;
+  region: RegionCode;
+  label?: string;
+  activation?: TabActivationMode;
+  triggerEvent?: string | readonly string[];
+}
 
 export type FeatureId =
   | "reading"
+  | "continuousReading"
   | "speechRate"
+  | "voiceSelection"
   | "colorScheme"
   | "zoomIn"
   | "zoomOut"
   | "largeCursor"
   | "crosshair"
   | "fullscreen"
+  | "largeCaption"
   | "pin"
   | "reset"
   | "help"
@@ -140,12 +167,35 @@ export interface AccessibilityToolState {
   isCollapsed: boolean;
   isReadScreen: boolean;
   readingEnabled: boolean;
+  continuousReadingState: ContinuousReadingState;
+  captionEnabled: boolean;
+  captionFontSize: CaptionFontSize;
+  captionScript: CaptionScript;
+  captionPinyinEnabled: boolean;
   speechRate: number;
   colorScheme: ColorScheme;
   zoom: number;
   largeCursor: boolean;
   crosshair: boolean;
   isFullscreen: boolean;
+}
+
+export type ContinuousReadingState = "idle" | "playing" | "paused";
+export type ContinuousReadingScope = "page" | "dialog";
+export type ContinuousReadingStopReason =
+  | "completed"
+  | "stopped"
+  | "interaction"
+  | "dialog"
+  | "route"
+  | "disabled"
+  | "lifecycle"
+  | "error";
+
+export interface ContinuousReadingPosition {
+  index: number;
+  count: number;
+  textLength: number;
 }
 
 export interface RegionChangeEvent {
@@ -163,11 +213,35 @@ export interface AccessibilityToolEventMap {
   regionchange: RegionChangeEvent;
   speechstart: { textLength: number };
   speechend: undefined;
+  continuousreadingstart: {
+    state: "playing";
+    scope: ContinuousReadingScope;
+    count: number;
+  };
+  continuousreadingsegmentchange: ContinuousReadingPosition & {
+    state: "playing";
+  };
+  continuousreadingpause: ContinuousReadingPosition & {
+    state: "paused";
+  };
+  continuousreadingresume: ContinuousReadingPosition & {
+    state: "playing";
+  };
+  continuousreadingstop: {
+    state: "idle";
+    reason: ContinuousReadingStopReason;
+    lastIndex: number | null;
+    count: number;
+  };
   error: { error: unknown; message: string };
 }
 
 export interface AccessibilityToolApi {
   configure(config: AccessibilityToolConfig): AccessibilityToolApi;
+  registerRegions(
+    configs: RegionRegistrationConfig[],
+  ): RegistrationHandle;
+  registerTabs(configs: TabRegistrationItem[]): RegistrationHandle;
   open(options?: AccessibilityToolOpenOptions): Promise<AccessibilityToolApi>;
   close(): Promise<AccessibilityToolApi>;
   toggle(options?: AccessibilityToolOpenOptions): Promise<AccessibilityToolApi>;
@@ -194,6 +268,18 @@ export interface PersistedPreferences {
   crosshair: boolean;
   isPinned: boolean;
   isReadScreen: boolean;
+  captionEnabled?: boolean;
+  captionFontSize?: CaptionFontSize;
+  captionScript?: CaptionScript;
+  captionPinyinEnabled?: boolean;
+  preferredLanguage?: string;
+  voice?: PersistedVoicePreference;
+}
+
+export interface PersistedVoicePreference {
+  voiceURI: string;
+  name: string;
+  lang: string;
 }
 
 declare global {

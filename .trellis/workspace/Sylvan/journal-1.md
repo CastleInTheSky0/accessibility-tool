@@ -237,3 +237,139 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 8: 完成 JavaScript 盲道区域注册任务
+
+**Date**: 2026-08-05
+**Task**: 完成 JavaScript 盲道区域注册任务
+**Branch**: `feat/dom-region-registration`
+
+### Summary
+
+复核 dom-region-registration 的实现、公共声明与测试覆盖；类型检查、lint、112 项单元测试、构建及 Chrome/Edge 96 项 E2E 全部通过，任务已归档。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d45cf80` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 9: 完成前端自动语言检测
+
+**Date**: 2026-08-05
+**Task**: 完成前端自动语言检测
+**Branch**: `feat/language-detection`
+
+### Summary
+
+完成 AccessibilityTool v0.2 二期任务拆分，并实现纯前端自动语言检测、可选语言偏好兼容、动态 DOM 重新解析、单元与 Chrome/Edge E2E 覆盖及接入规范更新。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4168221` | (see git log) |
+| `ef07f9b` | (see git log) |
+| `3463bf9` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 10: 完成浏览器本地音色选择
+
+**Date**: 2026-08-06
+**Task**: 完成浏览器本地音色选择
+**Branch**: `feat/accessibility-tool-v0.2`
+
+### Summary
+
+实现浏览器本地音色目录、语言筛选、偏好恢复、试听、14 控件桌面工具栏与 1280px 版心；修复 closed Shadow Root 外部点击和焦点恢复边界，Chrome/Edge 全量测试通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f6f9734` | (see git log) |
+| `f957abf` | (see git log) |
+| `495f313` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 11: 完成连续朗读功能
+
+**Date**: 2026-08-11
+**Task**: 完成连续朗读功能
+**Branch**: `feat/accessibility-tool-v0.2`
+
+### Summary
+
+完成连续朗读会话、控制面板、跨区域朗读、焦点与生命周期边界处理，并通过类型检查、代码检查、171 项单元测试、构建及 Chrome/Edge 108 项端到端测试。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cccbb55` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

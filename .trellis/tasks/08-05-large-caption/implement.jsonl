@@ -1,0 +1,10 @@
+{"file":".trellis/spec/frontend/index.md","reason":"前端规范入口与开发前检查清单"}
+{"file":".trellis/spec/frontend/accessibility-tool-contract.md","reason":"公共 API、Shadow DOM、语音事件、生命周期与测试契约"}
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"工具栏与字幕浮层组件组织约定"}
+{"file":".trellis/spec/frontend/state-management.md","reason":"偏好持久化、运行时状态与单一数据源约定"}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"公共类型扩展和运行时边界类型安全"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"实现质量、性能与禁止模式"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"复用现有朗读、状态和控件模式，避免建立平行实现"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"功能跨越公共 API、存储、语音控制器、UI 与测试"}
+{"file":".trellis/tasks/08-05-large-caption/research/caption-entry-options.md","reason":"已确认的工具栏入口位置与 1280px 单行约束"}
+{"file":".trellis/tasks/08-05-large-caption/research/caption-placement-options.md","reason":"已确认的全宽底部字幕布局与滚动约束"}

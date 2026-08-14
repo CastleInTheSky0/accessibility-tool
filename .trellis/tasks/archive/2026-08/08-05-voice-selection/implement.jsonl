@@ -1,0 +1,5 @@
+{"file":".trellis/spec/frontend/index.md","reason":"Frontend spec entry point and routing for this runtime/UI task."}
+{"file":".trellis/spec/frontend/accessibility-tool-contract.md","reason":"Authoritative public API, toolbar, persistence, speech, accessibility, lifecycle, build, and test contracts."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Voice data crosses catalog, persistence, speech adapter, toolbar UI, lifecycle, and documentation boundaries."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"The implementation must extend existing language, speech, storage, toolbar, and constant patterns without duplication."}
+{"file":".trellis/tasks/08-05-voice-selection/research/existing-voice-flow.md","reason":"Repository-specific speech flow, Web Speech constraints, toolbar decision, fallback matrix, and available test seams."}

@@ -65,13 +65,16 @@ export const COLOR_SCHEME_LABELS: Readonly<Record<ColorScheme, string>> = {
 
 export const MAIN_FEATURE_ORDER: readonly FeatureId[] = [
   "reading",
+  "continuousReading",
   "speechRate",
+  "voiceSelection",
   "colorScheme",
   "zoomIn",
   "zoomOut",
   "largeCursor",
   "crosshair",
   "fullscreen",
+  "largeCaption",
   "pin",
   "reset",
   "help",

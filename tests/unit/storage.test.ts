@@ -27,6 +27,112 @@ describe("PreferenceStore", () => {
     expect(store.load()).toBeNull();
   });
 
+  it("accepts an optional preferred language without breaking v0.1 payloads", () => {
+    const legacyKey = "test:legacy-preferences";
+    localStorage.setItem(
+      legacyKey,
+      JSON.stringify({ version: 1, preferences }),
+    );
+    expect(new PreferenceStore(legacyKey, 1).load()).toEqual(preferences);
+
+    const languagePreferences: PersistedPreferences = {
+      ...preferences,
+      preferredLanguage: "en-US",
+    };
+    const store = new PreferenceStore("test:language-preferences", 1);
+    store.save(languagePreferences);
+    expect(store.load()).toEqual(languagePreferences);
+  });
+
+  it("ignores only a corrupt preferred-language field", () => {
+    const key = "test:invalid-language-preferences";
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        version: 1,
+        preferences: { ...preferences, preferredLanguage: 42 },
+      }),
+    );
+
+    expect(new PreferenceStore(key, 1).load()).toEqual(preferences);
+  });
+
+  it("round-trips caption preferences while keeping v0.1 payloads valid", () => {
+    const captionPreferences: PersistedPreferences = {
+      ...preferences,
+      captionEnabled: true,
+      captionFontSize: 48,
+      captionScript: "traditional",
+      captionPinyinEnabled: true,
+    };
+    const store = new PreferenceStore("test:caption-preferences", 1);
+    store.save(captionPreferences);
+
+    expect(store.load()).toEqual(captionPreferences);
+    expect(localStorage.getItem("test:caption-preferences")).not.toContain(
+      "字幕正文",
+    );
+  });
+
+  it("ignores invalid caption siblings instead of rejecting the payload", () => {
+    const key = "test:invalid-caption-preferences";
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        version: 1,
+        preferences: {
+          ...preferences,
+          captionEnabled: "yes",
+          captionFontSize: 99,
+          captionScript: "taiwan",
+          captionPinyinEnabled: 1,
+        },
+      }),
+    );
+
+    expect(new PreferenceStore(key, 1).load()).toEqual(preferences);
+  });
+
+  it("round-trips a serializable voice descriptor", () => {
+    const voicePreferences: PersistedPreferences = {
+      ...preferences,
+      voice: {
+        voiceURI: "local:zh-female",
+        name: "本地女声",
+        lang: "zh-CN",
+      },
+    };
+    const store = new PreferenceStore("test:voice-preferences", 1);
+
+    store.save(voicePreferences);
+
+    expect(store.load()).toEqual(voicePreferences);
+    const payload = JSON.parse(
+      localStorage.getItem("test:voice-preferences") ?? "null",
+    ) as { preferences?: { voice?: unknown } } | null;
+    expect(payload?.preferences?.voice).toEqual(voicePreferences.voice);
+  });
+
+  it("ignores only a corrupt voice descriptor", () => {
+    const key = "test:invalid-voice-preferences";
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        version: 1,
+        preferences: {
+          ...preferences,
+          preferredLanguage: "ja-JP",
+          voice: { voiceURI: 7, name: "", lang: false },
+        },
+      }),
+    );
+
+    expect(new PreferenceStore(key, 1).load()).toEqual({
+      ...preferences,
+      preferredLanguage: "ja-JP",
+    });
+  });
+
   it("ignores corrupt or incompatible payloads", () => {
     localStorage.setItem("test:corrupt", "not-json");
     expect(new PreferenceStore("test:corrupt", 1).load()).toBeNull();

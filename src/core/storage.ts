@@ -1,5 +1,11 @@
 import { COLOR_SCHEMES } from "./constants";
-import type { ColorScheme, PersistedPreferences } from "../types";
+import type {
+  CaptionFontSize,
+  CaptionScript,
+  ColorScheme,
+  PersistedPreferences,
+  PersistedVoicePreference,
+} from "../types";
 
 interface StoredPayload {
   version: number;
@@ -21,6 +27,35 @@ const isColorScheme = (value: unknown): value is ColorScheme =>
   typeof value === "string" &&
   (COLOR_SCHEMES as readonly string[]).includes(value);
 
+const isCaptionFontSize = (value: unknown): value is CaptionFontSize =>
+  value === 28 || value === 36 || value === 48;
+
+const isCaptionScript = (value: unknown): value is CaptionScript =>
+  value === "simplified" || value === "traditional";
+
+function parseVoicePreference(
+  value: unknown,
+): PersistedVoicePreference | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const candidate = value as Partial<PersistedVoicePreference>;
+  if (
+    typeof candidate.voiceURI !== "string" ||
+    typeof candidate.name !== "string" ||
+    !candidate.name.trim() ||
+    typeof candidate.lang !== "string" ||
+    !candidate.lang.trim()
+  ) {
+    return null;
+  }
+  return {
+    voiceURI: candidate.voiceURI.trim(),
+    name: candidate.name.trim(),
+    lang: candidate.lang.trim(),
+  };
+}
+
 function parsePreferences(value: unknown): PersistedPreferences | null {
   if (!value || typeof value !== "object") {
     return null;
@@ -40,7 +75,39 @@ function parsePreferences(value: unknown): PersistedPreferences | null {
     return null;
   }
 
-  return candidate as PersistedPreferences;
+  const parsed: PersistedPreferences = {
+    readingEnabled: candidate.readingEnabled,
+    speechRate: candidate.speechRate,
+    colorScheme: candidate.colorScheme,
+    zoom: candidate.zoom,
+    largeCursor: candidate.largeCursor,
+    crosshair: candidate.crosshair,
+    isPinned: candidate.isPinned,
+    isReadScreen: candidate.isReadScreen,
+  };
+  if (isBoolean(candidate.captionEnabled)) {
+    parsed.captionEnabled = candidate.captionEnabled;
+  }
+  if (isCaptionFontSize(candidate.captionFontSize)) {
+    parsed.captionFontSize = candidate.captionFontSize;
+  }
+  if (isCaptionScript(candidate.captionScript)) {
+    parsed.captionScript = candidate.captionScript;
+  }
+  if (isBoolean(candidate.captionPinyinEnabled)) {
+    parsed.captionPinyinEnabled = candidate.captionPinyinEnabled;
+  }
+  if (
+    typeof candidate.preferredLanguage === "string" &&
+    candidate.preferredLanguage.trim()
+  ) {
+    parsed.preferredLanguage = candidate.preferredLanguage.trim();
+  }
+  const voice = parseVoicePreference(candidate.voice);
+  if (voice) {
+    parsed.voice = voice;
+  }
+  return parsed;
 }
 
 export class PreferenceStore {
@@ -68,7 +135,7 @@ export class PreferenceStore {
   }
 
   save(preferences: PersistedPreferences): void {
-    this.memory = { ...preferences };
+    this.memory = clonePreferences(preferences);
     try {
       const payload: StoredPayload = {
         version: this.version,
@@ -88,6 +155,15 @@ export class PreferenceStore {
       // Storage may be unavailable; memory is already cleared.
     }
   }
+}
+
+function clonePreferences(
+  preferences: PersistedPreferences,
+): PersistedPreferences {
+  return {
+    ...preferences,
+    ...(preferences.voice ? { voice: { ...preferences.voice } } : {}),
+  };
 }
 
 export function deriveOpenStateStorageKey(storageKey: string): string {

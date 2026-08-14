@@ -120,6 +120,42 @@ export class TabsController {
     }
   }
 
+  releaseElements(elements: readonly HTMLElement[]): void {
+    const released = new Set(elements);
+    if (released.size === 0) {
+      return;
+    }
+    for (const element of elements) {
+      const group = this.groups.get(element);
+      if (!group) {
+        continue;
+      }
+      for (const tab of group.tabs) {
+        released.add(tab);
+        const panel = group.panels.get(tab);
+        if (panel) {
+          released.add(panel);
+        }
+      }
+    }
+    this.lifecycleGeneration += 1;
+    this.setTabNavigationPending(false);
+    for (const element of released) {
+      this.ledger.restoreElement(element);
+      this.pendingPanelEntries.delete(element);
+      this.pendingPanelLeaves.delete(element);
+      this.pendingPanelActivations.delete(element);
+      this.suppressedTabFocusAnnouncements.delete(element);
+    }
+    if (this.activeDialog && released.has(this.activeDialog)) {
+      this.modalLedger.restore();
+      this.activeDialog = null;
+      this.dialogOrigin = null;
+    } else if (this.dialogOrigin && released.has(this.dialogOrigin)) {
+      this.dialogOrigin = null;
+    }
+  }
+
   private buildGroup(
     root: Document | ShadowRoot,
     list: HTMLElement,
@@ -221,6 +257,11 @@ export class TabsController {
     return false;
   }
 
+  isContinuousReadingTab(element: HTMLElement): boolean {
+    const group = this.findGroup(element);
+    return group?.tabs.includes(element) ?? false;
+  }
+
   requestPanelVisibility(panel: HTMLElement): Promise<boolean> {
     if (!this.running || !panel.isConnected) {
       return Promise.resolve(false);
@@ -286,8 +327,9 @@ export class TabsController {
     if (!group) {
       return;
     }
+    const generation = this.lifecycleGeneration;
     requestAnimationFrame(() => {
-      if (tab.isConnected) {
+      if (tab.isConnected && this.isLifecycleCurrent(generation)) {
         this.syncSelection(group, tab);
         const panel = group.panels.get(tab);
         if (panel && isVisible(panel)) {
@@ -421,9 +463,13 @@ export class TabsController {
   }
 
   private activateTab(group: TabGroup, tab: HTMLElement): void {
+    const generation = this.lifecycleGeneration;
     const events = this.resolveTriggerEvents(tab);
     for (const eventName of events) {
       this.dispatchOriginalEvent(tab, eventName);
+      if (!this.isLifecycleCurrent(generation)) {
+        return;
+      }
     }
 
     this.syncSelection(group, tab);
@@ -433,6 +479,9 @@ export class TabsController {
     }
 
     requestAnimationFrame(() => {
+      if (!this.isLifecycleCurrent(generation)) {
+        return;
+      }
       this.syncSelection(group, tab);
       if (panel && !isVisible(panel)) {
         this.markDiagnostic(group.list, "原页面事件未显示关联面板");
@@ -453,8 +502,11 @@ export class TabsController {
     const events = this.resolveTriggerEvents(tab);
     for (const eventName of events) {
       this.dispatchOriginalEvent(tab, eventName);
+      if (!this.isLifecycleCurrent(generation)) {
+        return false;
+      }
     }
-    if (!this.running || generation !== this.lifecycleGeneration) {
+    if (!this.isLifecycleCurrent(generation)) {
       return false;
     }
     this.syncSelection(group, tab);
@@ -470,32 +522,17 @@ export class TabsController {
   }
 
   private resolveActivation(tab: HTMLElement): TabActivationMode {
-    const value = tab.getAttribute("data-a11y-activation")?.trim();
-    return value === "manual" || value === "automatic"
-      ? value
-      : this.config.tabs.defaultActivation;
+    return resolveTabActivation(
+      tab.getAttribute("data-a11y-activation"),
+      this.config.tabs.defaultActivation,
+    );
   }
 
   private resolveTriggerEvents(tab: HTMLElement): string[] {
-    const tabEvents = tab.getAttribute("data-a11y-trigger-event")?.trim();
-    const configured = this.config.tabs.triggerEvents;
-    const raw: readonly string[] = tabEvents
-      ? [tabEvents]
-      : typeof configured === "string"
-        ? [configured]
-        : configured;
-    const result = new Set<string>();
-    for (const value of raw) {
-      for (const eventName of value.split(/\s+/)) {
-        if (eventName) {
-          result.add(eventName);
-        }
-      }
-    }
-    if (result.size === 0) {
-      result.add("click");
-    }
-    return Array.from(result);
+    return resolveTabTriggerEvents(
+      tab.getAttribute("data-a11y-trigger-event"),
+      this.config.tabs.triggerEvents,
+    );
   }
 
   private dispatchOriginalEvent(tab: HTMLElement, eventName: string): void {
@@ -545,11 +582,15 @@ export class TabsController {
     if (!panel || this.pendingPanelEntries.has(panel)) {
       return;
     }
+    const generation = this.lifecycleGeneration;
     this.pendingPanelEntries.add(panel);
     try {
       const ready = isVisible(panel)
         ? true
         : await this.requestPanelVisibility(panel);
+      if (!this.isLifecycleCurrent(generation)) {
+        return;
+      }
       if (!ready) {
         this.callbacks.onAnnounce("关联内容面板未能打开");
         this.report(
@@ -567,7 +608,10 @@ export class TabsController {
       } else {
         panel.focus();
       }
-      if (!isElementFocused(panel)) {
+      if (
+        !this.isLifecycleCurrent(generation) ||
+        !isElementFocused(panel)
+      ) {
         return;
       }
       if (this.isDialog(panel)) {
@@ -591,6 +635,7 @@ export class TabsController {
     if (this.pendingPanelLeaves.has(panel)) {
       return;
     }
+    const generation = this.lifecycleGeneration;
     this.pendingPanelLeaves.add(panel);
     this.suppressedTabFocusAnnouncements.add(tab);
     try {
@@ -600,11 +645,17 @@ export class TabsController {
           return;
         }
       }
+      if (!this.isLifecycleCurrent(generation)) {
+        return;
+      }
       this.manageModalBackground(panel, false);
       this.activeDialog = null;
       this.dialogOrigin = null;
       tab.focus();
-      if (isElementFocused(tab)) {
+      if (
+        this.isLifecycleCurrent(generation) &&
+        isElementFocused(tab)
+      ) {
         this.callbacks.onAnnounce(
           formatPanelReturnAnnouncement(getTabName(tab)),
         );
@@ -763,6 +814,10 @@ export class TabsController {
     }
   }
 
+  private isLifecycleCurrent(generation: number): boolean {
+    return this.running && generation === this.lifecycleGeneration;
+  }
+
   private setTabNavigationPending(pending: boolean): void {
     if (this.tabNavigationTimer !== null) {
       window.clearTimeout(this.tabNavigationTimer);
@@ -801,6 +856,22 @@ export function formatTabFocusAnnouncement(
   return `${prefix}${region}，当前有浮动窗口，按 ALT+下键进入窗口`;
 }
 
+export function resolveTabActivation(
+  value: unknown,
+  fallback: TabActivationMode,
+): TabActivationMode {
+  return value === "manual" || value === "automatic" ? value : fallback;
+}
+
+export function resolveTabTriggerEvents(
+  value: unknown,
+  fallback: string | readonly string[],
+): string[] {
+  const declared = collectTriggerEvents(value);
+  const result = declared.length > 0 ? declared : collectTriggerEvents(fallback);
+  return result.length > 0 ? result : ["click"];
+}
+
 export function formatPanelEntryAnnouncement(
   tabName: string,
   regionType: RegionType | null,
@@ -823,6 +894,24 @@ function getTabName(tab: HTMLElement): string {
 
 function isLinkTab(tab: HTMLElement): boolean {
   return tab.tagName === "A" && tab.hasAttribute("href");
+}
+
+function collectTriggerEvents(value: unknown): string[] {
+  const values =
+    typeof value === "string"
+      ? [value]
+      : Array.isArray(value) && value.every((item) => typeof item === "string")
+        ? value
+        : [];
+  const result = new Set<string>();
+  for (const item of values) {
+    for (const eventName of item.split(/\s+/)) {
+      if (eventName) {
+        result.add(eventName);
+      }
+    }
+  }
+  return Array.from(result);
 }
 
 function isElementFocused(element: HTMLElement): boolean {

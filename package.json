@@ -1,6 +1,6 @@
 {
   "name": "accessibility-tool",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A zero-runtime-dependency accessibility toolbar for modern websites.",
   "type": "module",
   "main": "./dist/accessibility-tool.min.js",
@@ -24,7 +24,7 @@
   ],
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "pnpm typecheck && vite build",
+    "build": "pnpm typecheck && vite build && vite build --mode language && node scripts/verify-build.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
@@ -47,5 +47,9 @@
     "vite": "^8.2.0",
     "vite-plugin-dts": "^5.0.3",
     "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "opencc-js": "1.4.1",
+    "pinyin-pro": "3.29.1"
   }
 }

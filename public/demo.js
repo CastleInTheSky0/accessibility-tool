@@ -99,4 +99,175 @@
       <strong>开放式 Shadow Root 导航</strong><br>
       <a href="#regions">返回区域协议</a>
     </nav>`;
+
+  const registrationDemo = document.getElementById("api-registration-demo");
+  if (registrationDemo) {
+    const registerAllButton = document.getElementById("js-register-all");
+    const disposeRegionsButton = document.getElementById("js-dispose-regions");
+    const disposeTabsButton = document.getElementById("js-dispose-tabs");
+    const destroyButton = document.getElementById("js-destroy-tool");
+    const status = document.getElementById("js-registration-status");
+    const regionStatus = document.getElementById("js-region-status");
+    const tabStatus = document.getElementById("js-tab-status");
+    const eventStatus = document.getElementById("js-event-status");
+    const contentElement = registrationDemo.querySelector(
+      '[data-js-region="content"]',
+    );
+    const runtimeTabs = Array.from(
+      registrationDemo.querySelectorAll("[data-js-tab]"),
+    );
+    const runtimePanels = Array.from(
+      registrationDemo.querySelectorAll("[data-js-panel]"),
+    );
+    let regionRegistration = null;
+    let tabRegistration = null;
+    let hostEventCount = 0;
+
+    const refreshRegistrationStatus = () => {
+      const registeredRegionCount = registrationDemo.querySelectorAll(
+        "[data-js-region][data-a11y-region]",
+      ).length;
+      const firstTab = runtimeTabs[0];
+      const firstPanel = runtimePanels[0];
+      const tablistCount = new Set(
+        runtimeTabs.map((tab) => tab.parentElement).filter(Boolean),
+      ).size;
+
+      registrationDemo.toggleAttribute(
+        "data-regions-registered",
+        Boolean(regionRegistration),
+      );
+      registrationDemo.toggleAttribute(
+        "data-tabs-registered",
+        Boolean(tabRegistration),
+      );
+      regionStatus.textContent = regionRegistration
+        ? `${registeredRegionCount} 个节点已注册`
+        : "等待注册";
+      tabStatus.textContent = tabRegistration
+        ? `${runtimeTabs.length} 个选项 · ${tablistCount} 组 tablist`
+        : "等待注册";
+      tabStatus.title = tabRegistration
+        ? `${firstTab?.id || ""} → ${firstPanel?.id || ""}`
+        : "";
+      eventStatus.textContent = `click × ${hostEventCount}`;
+      const allRegistered = Boolean(regionRegistration && tabRegistration);
+      registerAllButton.disabled = allRegistered;
+      registerAllButton.textContent = allRegistered
+        ? "已完成全部注册"
+        : regionRegistration || tabRegistration
+          ? "补全注册"
+          : "运行全部注册";
+      disposeRegionsButton.disabled = !regionRegistration;
+      disposeTabsButton.disabled = !tabRegistration;
+
+      status.classList.remove("is-updating");
+      void status.offsetWidth;
+      status.classList.add("is-updating");
+    };
+
+    const registerRegions = () => {
+      if (regionRegistration || !contentElement) {
+        return;
+      }
+      regionRegistration = tool.registerRegions([
+        {
+          target: '[data-js-region="viewport"]',
+          region: 1,
+          label: "入口",
+        },
+        {
+          target: '[data-js-region="navigation"]',
+          region: 2,
+          label: "快捷导航",
+        },
+        {
+          target: '[data-js-region="interaction"]',
+          region: 3,
+          label: "参数操作",
+        },
+        {
+          target: '[data-js-region="service"]',
+          region: 4,
+          label: "查询服务",
+        },
+        {
+          target: '[data-js-region="list"]',
+          region: 5,
+          label: "结果清单",
+        },
+        { target: contentElement, region: 6, label: "说明正文" },
+      ]);
+    };
+
+    const registerTabs = () => {
+      if (tabRegistration) {
+        return;
+      }
+      tabRegistration = tool.registerTabs([
+        {
+          tab: ".services-tab-hditem",
+          panel: ".services-tabcut-bdcontent",
+          region: 1,
+        },
+      ]);
+    };
+
+    const activateRuntimeTab = (tab) => {
+      if (!tabRegistration) {
+        return;
+      }
+      const group = tab.closest("[data-js-tab-group]");
+      if (!group) {
+        return;
+      }
+      hostEventCount += 1;
+      const activeKey = tab.dataset.jsTab;
+      const groupTabs = group.querySelectorAll("[data-js-tab]");
+      const groupPanels = group.querySelectorAll("[data-js-panel]");
+      for (const item of groupTabs) {
+        item.setAttribute("aria-selected", String(item === tab));
+      }
+      for (const panel of groupPanels) {
+        const active = panel.dataset.jsPanel === activeKey;
+        panel.setAttribute("aria-hidden", String(!active));
+        panel.toggleAttribute("data-a11y-hidden", !active);
+      }
+      refreshRegistrationStatus();
+    };
+
+    for (const tab of runtimeTabs) {
+      tab.addEventListener("click", () => activateRuntimeTab(tab));
+    }
+
+    registerAllButton.addEventListener("click", () => {
+      registerRegions();
+      registerTabs();
+      refreshRegistrationStatus();
+    });
+
+    disposeRegionsButton.addEventListener("click", () => {
+      regionRegistration?.dispose();
+      regionRegistration = null;
+      refreshRegistrationStatus();
+    });
+
+    disposeTabsButton.addEventListener("click", () => {
+      tabRegistration?.dispose();
+      tabRegistration = null;
+      refreshRegistrationStatus();
+    });
+
+    destroyButton.addEventListener("click", async () => {
+      destroyButton.disabled = true;
+      await tool.destroy();
+      regionRegistration = null;
+      tabRegistration = null;
+      hostEventCount = 0;
+      destroyButton.disabled = false;
+      refreshRegistrationStatus();
+    });
+
+    refreshRegistrationStatus();
+  }
 })();

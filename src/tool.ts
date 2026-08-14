@@ -17,22 +17,41 @@ import {
   OpenStateStore,
   PreferenceStore,
 } from "./core/storage";
+import { DomRegistrationController } from "./features/dom-registration";
 import { PageEffectsController } from "./features/page-effects";
+import { normalizeLanguageTag } from "./features/language";
+import { OutputCoordinator } from "./features/output";
 import { ReadingController } from "./features/reading";
 import { RegionNavigationController } from "./features/region-navigation";
 import { RegionScanner } from "./features/regions";
-import { SpeechController } from "./features/speech";
+import {
+  BrowserSpeechAdapter,
+  SpeechController,
+} from "./features/speech";
 import { TabsController } from "./features/tabs";
+import {
+  createBrowserLocalVoiceRuntime,
+  type BrowserNativeVoiceResolver,
+  type VoiceCatalogProvider,
+  type VoiceRuntimeCapability,
+} from "./features/voice-selection";
 import { StyleManager } from "./ui/style-manager";
 import { ToolbarUI, type ToolbarAction } from "./ui/toolbar";
+import type { VoiceSettingsModel } from "./ui/voice-settings";
 import type {
   AccessibilityToolApi,
   AccessibilityToolConfig,
   AccessibilityToolEventMap,
   AccessibilityToolOpenOptions,
   AccessibilityToolState,
+  CaptionFontSize,
+  CaptionScript,
   PersistedPreferences,
+  PersistedVoicePreference,
+  RegionRegistrationConfig,
+  RegistrationHandle,
   RegionType,
+  TabRegistrationItem,
 } from "./types";
 
 type OpenMode = "explicit" | "restore";
@@ -55,6 +74,15 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
   private readonly stores = new Map<string, PreferenceStore>();
   private readonly openStateStores = new Map<string, OpenStateStore>();
   private readonly shortcutDocuments = new Set<Document>();
+  private readonly registrations = new DomRegistrationController({
+    getConfig: () => (this.state.isOpen ? this.activeConfig : this.baseConfig),
+    beforeTabChange: (elements) => this.tabs?.releaseElements(elements),
+    onChange: () => {
+      if (this.state.isOpen) {
+        this.scanner?.refresh();
+      }
+    },
+  });
 
   private lastTrigger: HTMLElement | null = null;
   private host: HTMLDivElement | null = null;
@@ -62,19 +90,33 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
   private styles: StyleManager | null = null;
   private ui: ToolbarUI | null = null;
   private speech: SpeechController | null = null;
+  private output: OutputCoordinator | null = null;
+  private voiceCatalog: VoiceCatalogProvider | null = null;
+  private nativeVoiceResolver: BrowserNativeVoiceResolver | null = null;
+  private runtimeSpeechAdapterMode: "browser-local" | "custom-adapter" | null =
+    null;
+  private unsubscribeVoiceCatalog: (() => void) | null = null;
   private effects: PageEffectsController | null = null;
   private reading: ReadingController | null = null;
   private scanner: RegionScanner | null = null;
   private regionNavigation: RegionNavigationController | null = null;
   private tabs: TabsController | null = null;
   private tabsStarted = false;
+  private preferredLanguage: string | null = null;
+  private voicePreference: PersistedVoicePreference | null = null;
+  private cancelVoicePreviewRequest: (() => void) | null = null;
+  private voicePreviewActive = false;
+  private voicePreviewToken = 0;
   private suppressFullscreenAnnouncement = false;
   private openOperation: Promise<AccessibilityToolApi> | null = null;
   private openOperationMode: OpenMode | null = null;
   private autoRestoreSettled = false;
   private silentlyRestored = false;
 
-  constructor() {
+  constructor(
+    private readonly createVoiceRuntime: () => VoiceRuntimeCapability =
+      createBrowserLocalVoiceRuntime,
+  ) {
     if (typeof document !== "undefined") {
       void this.restoreOpenStateWhenReady();
     }
@@ -89,12 +131,31 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
       this.activeConfig = mergeConfig(this.baseConfig, this.sessionConfig);
     }
     const nextConfig = this.state.isOpen ? this.activeConfig : this.baseConfig;
+    if (
+      this.state.isOpen &&
+      this.state.continuousReadingState !== "idle" &&
+      (!nextConfig.features.continuousReading ||
+        (!nextConfig.features.reading &&
+          !nextConfig.features.largeCaption))
+    ) {
+      this.reading?.stopContinuous("disabled");
+    }
     this.reconcileOpenIntentAfterConfig(previousStorageKey, nextConfig);
     if (this.state.isOpen) {
       this.propagateConfig();
       this.applyState(false);
     }
     return this;
+  }
+
+  registerRegions(
+    configs: RegionRegistrationConfig[],
+  ): RegistrationHandle {
+    return this.registrations.registerRegions(configs);
+  }
+
+  registerTabs(configs: TabRegistrationItem[]): RegistrationHandle {
+    return this.registrations.registerTabs(configs);
   }
 
   async open(
@@ -194,6 +255,10 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
       if (trigger) {
         this.registerTrigger(trigger);
       }
+      this.reading?.rememberActivePageTarget();
+      if (options.trigger?.isConnected) {
+        this.reading?.rememberPageTarget(options.trigger);
+      }
       this.setTriggerExpanded(true);
       this.ui?.expandAndFocus();
       if (behavior.announceIfAlreadyOpen) {
@@ -216,6 +281,10 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
     }
 
     const stored = this.getStore().load();
+    this.preferredLanguage =
+      normalizeLanguageTag(stored?.preferredLanguage) ?? null;
+    this.voicePreference = stored?.voice ? { ...stored.voice } : null;
+    this.voiceCatalog?.start();
     this.state = constrainStateToFeatures(
       this.activeConfig,
       hydrateState(this.activeConfig, stored),
@@ -227,6 +296,7 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
 
     this.ui?.show();
     this.ui?.updateState(this.state);
+    this.updateVoiceSettings();
     this.updateAvailability();
     this.effects?.start();
     this.effects?.apply(this.state);
@@ -240,8 +310,10 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
       throw error;
     }
 
-    if (this.state.readingEnabled) {
-      this.reading?.start();
+    this.reading?.start();
+    this.reading?.rememberActivePageTarget();
+    if (options.trigger?.isConnected) {
+      this.reading?.rememberPageTarget(options.trigger);
     }
 
     this.setTriggerExpanded(true);
@@ -274,14 +346,21 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
   }
 
   async reset(): Promise<AccessibilityToolApi> {
+    this.ui?.closeVoiceSettings();
+    this.ui?.closeContinuousReadingSettings();
+    this.cancelVoicePreview();
     this.getStore().clear();
+    this.preferredLanguage = null;
+    this.voicePreference = null;
     if (!this.state.isOpen) {
       this.state = createDefaultState(this.activeConfig);
       return this;
     }
 
-    this.speech?.cancel();
-    this.reading?.stop();
+    this.reading?.stopContinuous("lifecycle");
+    this.reading?.clearContinuousStartContext();
+    this.output?.cancel();
+    this.reading?.cancel();
     this.suppressFullscreenAnnouncement = true;
     await this.effects?.exitFullscreen();
     this.suppressFullscreenAnnouncement = false;
@@ -315,6 +394,7 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
       await this.closeInternal(false);
     }
     this.teardownRuntimeNodes();
+    this.registrations.disposeAll(false);
     this.triggerLedger.restore();
     this.triggers.clear();
     this.lastTrigger = null;
@@ -323,6 +403,8 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
     this.sessionConfig = undefined;
     this.activeConfig = this.baseConfig;
     this.state = createDefaultState(this.activeConfig);
+    this.preferredLanguage = null;
+    this.voicePreference = null;
     this.silentlyRestored = false;
   }
 
@@ -460,28 +542,99 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
         this.effects?.clearFocusHighlight();
         this.regionNavigation?.clearActiveRegion();
       },
+      onVoiceLanguageChange: (language) =>
+        this.setPreferredLanguage(language),
+      onVoiceChange: (voice) => this.setVoicePreference(voice),
+      onVoicePreview: () => this.previewVoice(),
+      onVoiceClear: () => this.clearVoicePreferences(),
+      onVoiceSettingsClose: () => this.cancelVoicePreview(),
+      onContinuousReadingStart: () => this.startContinuousReading(),
+      onContinuousReadingPause: () => this.reading?.pauseContinuous(),
+      onContinuousReadingResume: () => this.reading?.resumeContinuous(),
+      onContinuousReadingStop: () =>
+        this.reading?.stopContinuous("stopped"),
+      onCaptionClose: () => this.setCaptionEnabled(false),
+      onCaptionFontSizeChange: (size) => this.setCaptionFontSize(size),
+      onCaptionScriptChange: (script) => this.setCaptionScript(script),
+      onCaptionPinyinChange: (enabled) =>
+        this.setCaptionPinyinEnabled(enabled),
     });
+    const configuredSpeechAdapter = this.activeConfig.speech.adapter;
+    this.runtimeSpeechAdapterMode = configuredSpeechAdapter
+      ? "custom-adapter"
+      : "browser-local";
+    if (!configuredSpeechAdapter) {
+      const voiceRuntime = this.createVoiceRuntime();
+      this.voiceCatalog = voiceRuntime.catalog;
+      this.nativeVoiceResolver = voiceRuntime.nativeVoiceResolver;
+      this.unsubscribeVoiceCatalog = this.voiceCatalog.subscribe(() =>
+        this.updateVoiceSettings(),
+      );
+    }
     this.speech = new SpeechController(
-      this.activeConfig.speech.adapter,
+      configuredSpeechAdapter ??
+        new BrowserSpeechAdapter((language) =>
+          this.nativeVoiceResolver?.resolveNativeVoice(
+            this.voicePreference,
+            language,
+          ) ?? null,
+        ),
       this.emitter,
     );
+    this.output = new OutputCoordinator(this.speech, this.ui, {
+      isAudioEnabled: () => this.state.isOpen && this.state.readingEnabled,
+      isCaptionEnabled: () => this.state.isOpen && this.state.captionEnabled,
+    });
     this.effects = new PageEffectsController(this.activeConfig, this.ui, {
       onFullscreenChange: (fullscreen) => this.handleFullscreenChange(fullscreen),
       onError: (error, message) => this.reportError(error, message),
     });
     this.reading = new ReadingController(
       this.activeConfig,
-      this.speech,
+      this.output,
       this.effects,
       {
-        isEnabled: () => this.state.isOpen && this.state.readingEnabled,
+        isEnabled: () =>
+          this.state.isOpen &&
+          (this.state.readingEnabled || this.state.captionEnabled),
         getRate: () => this.state.speechRate,
+        getPreferredLanguage: () => this.preferredLanguage,
       },
       {
         isRegionContainer: (element) =>
           this.regionNavigation?.isRegionContainer(element) ?? false,
         isTabSpeechTarget: (element) =>
           this.tabs?.isTabSpeechTarget(element) ?? false,
+        isContinuousReadingTab: (element) =>
+          this.tabs?.isContinuousReadingTab(element) ?? false,
+        getCurrentRegionElement: () =>
+          this.regionNavigation?.getCurrentRegionElement() ?? null,
+      },
+      {
+        onStateChange: (state) => this.setContinuousReadingState(state),
+        onStart: (event) =>
+          this.emitter.emit("continuousreadingstart", event),
+        onSegmentChange: (event) => {
+          this.updateContinuousReadingSettings();
+          this.emitter.emit("continuousreadingsegmentchange", event);
+        },
+        onPause: (event) => {
+          this.updateContinuousReadingSettings();
+          this.emitter.emit("continuousreadingpause", event);
+        },
+        onResume: (event) => {
+          this.updateContinuousReadingSettings();
+          this.emitter.emit("continuousreadingresume", event);
+        },
+        onStop: (event) => {
+          this.emitter.emit("continuousreadingstop", event);
+          if (event.reason === "completed") {
+            this.announce("连续朗读已完成", false);
+          } else if (event.reason === "error") {
+            this.announce("连续朗读已因语音错误停止", false);
+          }
+        },
+        onError: (error, message) => this.reportError(error, message),
       },
     );
     this.regionNavigation = new RegionNavigationController(this.effects, {
@@ -494,23 +647,34 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
         Promise.resolve(false),
       onCountsChange: (counts) => this.ui?.setRegionCounts(counts),
       onAnnounce: (message) => {
+        this.reading?.stopContinuous("interaction");
         this.reading?.cancel();
         this.announce(message);
       },
-      onCurrentRegionChange: (event) => this.ui?.setCurrentRegion(event),
+      onCurrentRegionChange: (event) => {
+        this.ui?.setCurrentRegion(event);
+        if (event) {
+          this.reading?.rememberRegionTarget(event.element);
+        }
+      },
       onRegionChange: (event) => {
+        this.reading?.rememberRegionTarget(event.element);
         this.ui?.setCurrentRegion(event);
         this.emitter.emit("regionchange", event);
       },
       onReturnToCategory: (type) => this.ui?.focusAction(`region:${type}`),
       onDynamicUpdate: () => {
         if (this.state.isReadScreen) {
-          this.announce("页面区域已更新");
+          this.announce(
+            "页面区域已更新",
+            this.state.continuousReadingState === "idle",
+          );
         }
       },
     });
     this.tabs = new TabsController(this.activeConfig, {
       onAnnounce: (message) => {
+        this.reading?.stopContinuous("interaction");
         this.reading?.cancel();
         this.announce(message);
       },
@@ -542,19 +706,28 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
         }
       },
       onRouteChange: () => {
-        this.speech?.cancel();
+        this.reading?.stopContinuous("route");
+        this.reading?.clearContinuousStartContext();
+        this.output?.cancel();
         this.reading?.cancel();
         this.regionNavigation?.resetPositions();
       },
       onError: (error, message) => this.reportError(error, message),
+      shouldSkipRegion: (element) =>
+        this.registrations.isRegisteredTab(element),
     });
   }
 
   private teardownRuntimeNodes(): void {
+    this.cancelVoicePreview();
+    this.unsubscribeVoiceCatalog?.();
+    this.unsubscribeVoiceCatalog = null;
+    this.voiceCatalog?.stop();
     this.scanner?.stop();
     this.tabs?.stop();
     this.regionNavigation?.stop();
     this.reading?.stop();
+    this.output?.cancel();
     this.effects?.destroy();
     this.ui?.destroy();
     this.styles?.destroy();
@@ -566,6 +739,10 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
     this.styles = null;
     this.ui = null;
     this.speech = null;
+    this.output = null;
+    this.voiceCatalog = null;
+    this.nativeVoiceResolver = null;
+    this.runtimeSpeechAdapterMode = null;
     this.effects = null;
     this.reading = null;
     this.scanner = null;
@@ -582,15 +759,20 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
     this.scanner?.updateConfig(this.activeConfig);
     this.tabs?.updateConfig(this.activeConfig);
     this.updateAvailability();
+    this.updateVoiceSettings();
   }
 
   private async closeInternal(returnFocus: boolean): Promise<void> {
     if (!this.state.isOpen) {
       return;
     }
+    this.ui?.closeVoiceSettings();
+    this.ui?.closeContinuousReadingSettings();
+    this.cancelVoicePreview();
     this.savePreferences();
+    this.voiceCatalog?.stop();
     this.reading?.stop();
-    this.speech?.cancel();
+    this.output?.cancel();
     this.scanner?.stop();
     this.tabs?.stop();
     this.tabsStarted = false;
@@ -623,6 +805,7 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
   ): Promise<void> {
     if (action.startsWith("region:")) {
       const type = action.slice("region:".length) as RegionType;
+      this.reading?.stopContinuous("interaction");
       await this.regionNavigation?.navigate(type);
       return;
     }
@@ -637,8 +820,14 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
       case "screenSound":
         this.setReadingEnabled(!this.state.readingEnabled);
         break;
+      case "continuousReading":
+        this.ui?.toggleContinuousReadingSettings();
+        break;
       case "speechRate":
         this.cycleSpeechRate();
+        break;
+      case "voiceSelection":
+        this.ui?.toggleVoiceSettings();
         break;
       case "colorScheme":
         this.cycleColorScheme();
@@ -664,6 +853,9 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
           this.reportError(error, "无法进入全屏，请检查浏览器权限。");
           this.announce("无法进入全屏，请检查浏览器权限", false);
         }
+        break;
+      case "largeCaption":
+        this.setCaptionEnabled(!this.state.captionEnabled);
         break;
       case "pin":
         this.commitState({
@@ -695,8 +887,57 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
       this.announce("当前浏览器不支持语音合成", false);
       return;
     }
+    if (!enabled && !this.state.captionEnabled) {
+      this.reading?.stopContinuous("disabled");
+      this.reading?.cancel();
+    }
     this.commitState({ readingEnabled: enabled });
-    this.announce(`朗读已${enabled ? "开启" : "关闭"}`, enabled);
+    if (!enabled && this.state.captionEnabled) {
+      this.output?.transitionAudioToText();
+    }
+    this.announce(
+      `朗读已${enabled ? "开启" : "关闭"}`,
+      enabled && this.state.continuousReadingState === "idle",
+    );
+  }
+
+  private setCaptionEnabled(enabled: boolean): void {
+    if (this.state.captionEnabled === enabled) {
+      return;
+    }
+    this.commitState({ captionEnabled: enabled });
+    const result = this.output?.setCaptionEnabled(enabled);
+    if (result?.stopTextOnlyContinuous) {
+      this.reading?.stopContinuous("stopped");
+    }
+    this.updateAvailability();
+    this.ui?.announce(`大字幕已${enabled ? "开启" : "关闭"}`);
+  }
+
+  private setCaptionFontSize(size: CaptionFontSize): void {
+    if (this.state.captionFontSize === size) {
+      return;
+    }
+    this.commitState({ captionFontSize: size });
+    this.ui?.announce(`字幕字号 ${size}px`);
+  }
+
+  private setCaptionScript(script: CaptionScript): void {
+    if (this.state.captionScript === script) {
+      return;
+    }
+    this.commitState({ captionScript: script });
+    this.ui?.announce(
+      `字幕已切换为${script === "simplified" ? "简体" : "繁体"}`,
+    );
+  }
+
+  private setCaptionPinyinEnabled(enabled: boolean): void {
+    if (this.state.captionPinyinEnabled === enabled) {
+      return;
+    }
+    this.commitState({ captionPinyinEnabled: enabled });
+    this.ui?.announce(`字幕拼音已${enabled ? "开启" : "关闭"}`);
   }
 
   private cycleSpeechRate(): void {
@@ -704,7 +945,10 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
       SPEECH_RATE_PRESETS.find((rate) => rate > this.state.speechRate) ??
       SPEECH_RATE_PRESETS[0];
     this.commitState({ speechRate: next });
-    this.announce(`当前语速 ${formatNumber(next)} 倍`);
+    this.announce(
+      `当前语速 ${formatNumber(next)} 倍`,
+      this.state.continuousReadingState === "idle",
+    );
   }
 
   private cycleColorScheme(): void {
@@ -743,7 +987,10 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
     const enabled = !this.state.isReadScreen;
     this.commitState({ isReadScreen: enabled, isCollapsed: false });
     this.ui?.focusAction("readScreen");
-    this.announce(enabled ? "已进入读屏专用模式" : "已返回主工具栏");
+    this.announce(
+      enabled ? "已进入读屏专用模式" : "已返回主工具栏",
+      this.state.continuousReadingState === "idle",
+    );
   }
 
   private commitState(patch: Partial<AccessibilityToolState>): void {
@@ -755,11 +1002,6 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
   private applyState(persist: boolean): void {
     this.ui?.updateState(this.state);
     this.effects?.apply(this.state);
-    if (this.state.readingEnabled) {
-      this.reading?.start();
-    } else {
-      this.reading?.stop();
-    }
     if (persist) {
       this.savePreferences();
     }
@@ -796,7 +1038,7 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
     );
     this.ui?.setFeatureAvailability(
       "speechRate",
-      speechSupported,
+      speechSupported || this.state.captionEnabled,
       "当前浏览器不支持语音合成，无法设置语速",
     );
     const screenSound = this.ui?.getControl("screenSound");
@@ -809,15 +1051,272 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
       this.effects?.isFullscreenSupported() ?? false,
       "当前浏览器不支持全屏功能",
     );
+    this.updateContinuousReadingSettings();
+    this.updateVoiceSettings();
+  }
+
+  private startContinuousReading(): void {
+    if (!this.speech?.isSupported() && !this.state.captionEnabled) {
+      this.announce("当前浏览器不支持语音合成", false);
+      this.updateContinuousReadingSettings();
+      return;
+    }
+    if (!this.state.readingEnabled && !this.state.captionEnabled) {
+      this.commitState({ readingEnabled: true });
+    }
+    const result = this.reading?.startContinuous() ?? "empty";
+    if (result === "unsupported") {
+      this.announce("当前浏览器不支持语音合成", false);
+    } else if (result === "empty") {
+      this.announce("当前范围没有可朗读内容", false);
+    }
+    this.updateContinuousReadingSettings();
+  }
+
+  private setContinuousReadingState(
+    continuousReadingState: AccessibilityToolState["continuousReadingState"],
+  ): void {
+    if (this.state.continuousReadingState === continuousReadingState) {
+      return;
+    }
+    this.state = { ...this.state, continuousReadingState };
+    this.ui?.updateState(this.state);
+    this.updateContinuousReadingSettings();
+    this.emitter.emit("statechange", this.getState());
+  }
+
+  private setPreferredLanguage(language: string | null): void {
+    const normalized = normalizeLanguageTag(language);
+    if (this.preferredLanguage === normalized) {
+      return;
+    }
+    this.cancelVoicePreview();
+    this.preferredLanguage = normalized;
+    this.savePreferences();
+    this.updateVoiceSettings();
+    this.announce(
+      normalized ? `默认语言已设为 ${normalized}` : "已恢复自动语言检测",
+      this.state.continuousReadingState === "idle",
+    );
+  }
+
+  private setVoicePreference(
+    voice: PersistedVoicePreference | null,
+  ): void {
+    this.cancelVoicePreview();
+    const language = normalizeLanguageTag(voice?.lang);
+    this.voicePreference =
+      voice && language
+        ? {
+            voiceURI: voice.voiceURI.trim(),
+            name: voice.name.trim(),
+            lang: language,
+          }
+        : null;
+    this.savePreferences();
+    this.updateVoiceSettings();
+    this.announce(
+      this.voicePreference
+        ? `已选择本地音色 ${this.voicePreference.name}`
+        : "音色已设为自动选择",
+      this.state.continuousReadingState === "idle",
+    );
+  }
+
+  private clearVoicePreferences(): void {
+    this.cancelVoicePreview();
+    this.preferredLanguage = null;
+    this.voicePreference = null;
+    this.savePreferences();
+    this.updateVoiceSettings();
+    this.announce(
+      "已清除语音偏好",
+      this.state.continuousReadingState === "idle",
+    );
+  }
+
+  private previewVoice(): void {
+    const model = this.createVoiceSettingsModel();
+    if (!model.previewEnabled || !this.output) {
+      this.announce(model.statusMessage || "当前没有可试听的本地音色", false);
+      return;
+    }
+    this.reading?.stopContinuous("interaction");
+    this.cancelVoicePreview();
+    const token = ++this.voicePreviewToken;
+    let finished = false;
+    const finish = (): void => {
+      if (finished || token !== this.voicePreviewToken) {
+        return;
+      }
+      finished = true;
+      this.cancelVoicePreviewRequest = null;
+      this.voicePreviewActive = false;
+      this.updateVoiceSettings();
+    };
+    this.voicePreviewActive = true;
+    this.updateVoiceSettings();
+    const cancel = this.output.speak(
+      getVoicePreviewText(model.effectiveLanguage),
+      model.effectiveLanguage,
+      this.state.speechRate,
+      {
+        kind: "preview",
+        forceAudio: true,
+        onEnd: finish,
+        onError: finish,
+        onCancel: finish,
+      },
+    );
+    if (!finished && token === this.voicePreviewToken) {
+      this.cancelVoicePreviewRequest = cancel;
+    }
+    if (!cancel) {
+      finish();
+    }
+  }
+
+  private cancelVoicePreview(): void {
+    const cancel = this.cancelVoicePreviewRequest;
+    const wasActive = this.voicePreviewActive;
+    this.voicePreviewToken += 1;
+    this.cancelVoicePreviewRequest = null;
+    this.voicePreviewActive = false;
+    cancel?.();
+    if (wasActive) {
+      this.updateVoiceSettings();
+    }
+  }
+
+  private updateVoiceSettings(): void {
+    this.ui?.updateVoiceSettings(this.createVoiceSettingsModel());
+  }
+
+  private updateContinuousReadingSettings(): void {
+    const segment = this.reading?.getCurrentSegment() ?? null;
+    this.ui?.updateContinuousReadingSettings({
+      state: this.state.continuousReadingState,
+      supported:
+        (this.speech?.isSupported() ?? false) || this.state.captionEnabled,
+      position: segment
+        ? {
+            index: segment.index,
+            count: segment.count,
+            textLength: segment.text.length,
+          }
+        : null,
+    });
+  }
+
+  private createVoiceSettingsModel(): VoiceSettingsModel {
+    const effectiveLanguage =
+      this.preferredLanguage ??
+      normalizeLanguageTag(this.activeConfig.locale) ??
+      DEFAULT_CONFIG.locale;
+    const hasPreferences = Boolean(
+      this.preferredLanguage || this.voicePreference,
+    );
+    if (this.runtimeSpeechAdapterMode === "custom-adapter") {
+      return {
+        availability: "custom-adapter",
+        catalogStatus: "unsupported",
+        preferredLanguage: this.preferredLanguage,
+        effectiveLanguage,
+        availableLanguages: [],
+        voices: [],
+        selectedVoiceId: null,
+        summary: "自定义语音",
+        statusMessage:
+          "当前站点使用自定义语音适配器，浏览器本地音色设置不可用。",
+        hasPreferences,
+        previewEnabled: false,
+        isPreviewing: false,
+      };
+    }
+    const snapshot = this.voiceCatalog?.getSnapshot() ?? {
+      capability: {
+        providerId: "browser-local",
+        localOnly: true,
+        supportsPreview: true,
+      },
+      status: "unsupported" as const,
+      voices: [],
+    };
+    const availableLanguages = Array.from(
+      new Set(snapshot.voices.map(({ lang }) => lang)),
+    ).sort((left, right) => left.localeCompare(right));
+    if (!this.speech?.isSupported() || snapshot.status === "unsupported") {
+      return {
+        availability: "unsupported",
+        catalogStatus: "unsupported",
+        preferredLanguage: this.preferredLanguage,
+        effectiveLanguage,
+        availableLanguages,
+        voices: [],
+        selectedVoiceId: null,
+        summary: "不可用",
+        statusMessage: "当前浏览器不支持本地语音合成或音色目录。",
+        hasPreferences,
+        previewEnabled: false,
+        isPreviewing: false,
+      };
+    }
+    const voices =
+      this.voiceCatalog?.getCompatibleVoices(effectiveLanguage) ?? [];
+    const selectedVoice =
+      this.voiceCatalog?.resolvePreference(
+        this.voicePreference,
+        effectiveLanguage,
+      ) ?? null;
+    const resolvedVoice =
+      snapshot.status === "ready"
+        ? this.nativeVoiceResolver?.resolveNativeVoice(
+            this.voicePreference,
+            effectiveLanguage,
+          ) ?? null
+        : null;
+    let statusMessage: string;
+    if (snapshot.status === "loading") {
+      statusMessage = "正在载入浏览器或系统提供的本地音色…";
+    } else if (voices.length === 0) {
+      statusMessage = `没有找到与 ${effectiveLanguage} 兼容的本地音色。`;
+    } else if (this.voicePreference && !selectedVoice) {
+      statusMessage =
+        "已保存的音色当前不可用，朗读将安全回退到兼容默认音色。";
+    } else if (!resolvedVoice && !selectedVoice) {
+      statusMessage = `已找到 ${voices.length} 个兼容本地音色；请选择一个音色后试听。`;
+    } else {
+      statusMessage = `已找到 ${voices.length} 个兼容本地音色。`;
+    }
+    return {
+      availability: "browser-local",
+      catalogStatus: snapshot.status,
+      preferredLanguage: this.preferredLanguage,
+      effectiveLanguage,
+      availableLanguages,
+      voices,
+      selectedVoiceId: selectedVoice?.id ?? null,
+      summary: selectedVoice?.name ?? "自动选择",
+      statusMessage,
+      hasPreferences,
+      previewEnabled: snapshot.status === "ready" && Boolean(resolvedVoice),
+      isPreviewing: this.voicePreviewActive,
+    };
   }
 
   private announce(message: string, synthesize = true): void {
     this.ui?.announce(message);
-    if (synthesize && this.state.readingEnabled && this.speech?.isSupported()) {
-      this.speech.speak(
+    if (
+      synthesize &&
+      this.output &&
+      (this.state.readingEnabled || this.state.captionEnabled)
+    ) {
+      this.reading?.stopContinuous("interaction");
+      this.output.speak(
         message,
         this.activeConfig.locale,
         this.state.speechRate,
+        { kind: "announcement" },
       );
     }
   }
@@ -919,6 +1418,14 @@ export class AccessibilityToolRuntime implements AccessibilityToolApi {
       crosshair: this.state.crosshair,
       isPinned: this.state.isPinned,
       isReadScreen: this.state.isReadScreen,
+      captionEnabled: this.state.captionEnabled,
+      captionFontSize: this.state.captionFontSize,
+      captionScript: this.state.captionScript,
+      captionPinyinEnabled: this.state.captionPinyinEnabled,
+      ...(this.preferredLanguage
+        ? { preferredLanguage: this.preferredLanguage }
+        : {}),
+      ...(this.voicePreference ? { voice: { ...this.voicePreference } } : {}),
     };
     this.getStore().save(preferences);
   }
@@ -999,6 +1506,11 @@ function createDefaultState(
     isCollapsed: false,
     isReadScreen: false,
     readingEnabled: false,
+    continuousReadingState: "idle",
+    captionEnabled: false,
+    captionFontSize: 36,
+    captionScript: "simplified",
+    captionPinyinEnabled: false,
     speechRate: clamp(config.speech.defaultRate, 0.5, 2),
     colorScheme: "original",
     zoom: 1,
@@ -1028,6 +1540,10 @@ function hydrateState(
     crosshair: stored.crosshair,
     isPinned: stored.isPinned,
     isReadScreen: stored.isReadScreen,
+    captionEnabled: stored.captionEnabled ?? false,
+    captionFontSize: stored.captionFontSize ?? 36,
+    captionScript: stored.captionScript ?? "simplified",
+    captionPinyinEnabled: stored.captionPinyinEnabled ?? false,
   };
 }
 
@@ -1038,6 +1554,13 @@ function constrainStateToFeatures(
   return {
     ...state,
     readingEnabled: config.features.reading && state.readingEnabled,
+    captionEnabled:
+      config.features.largeCaption && state.captionEnabled,
+    continuousReadingState:
+      config.features.continuousReading &&
+      (config.features.reading || config.features.largeCaption)
+      ? state.continuousReadingState
+      : "idle",
     colorScheme: config.features.colorScheme
       ? state.colorScheme
       : "original",
@@ -1087,6 +1610,20 @@ function clamp(value: number, min: number, max: number): number {
 
 function formatNumber(value: number): string {
   return Number(value.toFixed(2)).toString();
+}
+
+function getVoicePreviewText(language: string): string {
+  switch (language.split("-", 1)[0]?.toLowerCase()) {
+    case "en":
+      return "Hello, this is a preview of the selected local voice.";
+    case "ja":
+      return "こんにちは。選択したローカル音声の試聴です。";
+    case "ko":
+      return "안녕하세요. 선택한 로컬 음성 미리 듣기입니다.";
+    case "zh":
+    default:
+      return "您好，这是当前所选本地音色的试听。";
+  }
 }
 
 async function ensureDocumentReady(): Promise<void> {

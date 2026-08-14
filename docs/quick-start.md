@@ -8,6 +8,16 @@
 <script defer src="/assets/accessibility-tool.min.js"></script>
 ```
 
+页面虽然只写一个 `<script>`，部署时仍需把以下三个构建文件放在同一目录：
+
+```text
+/assets/accessibility-tool.min.js
+/assets/accessibility-tool-opencc.js
+/assets/accessibility-tool-pinyin.js
+```
+
+主入口会在首次显示字幕时自动加载 OpenCC 分包，并只在首次开启拼音时加载拼音分包；初次请求带当前包版本 `?v=<version>`，不需要额外标签或 CDN。请整体复制 `dist`，不要只复制主 JS；升级时原子替换同一次构建产生的三个文件，避免跨版本混用。若三个文件跨域托管，还需为两个 ESM 分包配置 CORS，并在站点 CSP 的 `script-src` 中允许该静态源。
+
 没有已保存的打开意图时，脚本本身不会打开工具或扫描页面。用户曾成功打开且未主动退出时，后续同源页面会在 DOM ready 后静默恢复。
 
 ## 2. 配置站点参数
@@ -61,7 +71,48 @@ openButtons.forEach((button) => {
 
 未显式标记时，默认仅保守识别有明确语义的 `nav`、`form`、`article` 及相关 ARIA role。原生 `main` 不再自动归为正文区，需要像上例一样显式标记；可以使用 `regions.autoDetect: false` 关闭全部语义自动识别。
 
-## 5. 销毁
+## 5. 无法改 HTML 时使用 JavaScript 注册
+
+普通区域支持 CSS 选择器和现有 `Element`。`region` 只使用数字 `1`～`6`，`label` 只填写短名称：
+
+```js
+const regions = AccessibilityTool.registerRegions([
+  { target: "#news", region: 1, label: "要闻" },
+  { target: document.querySelector("#main-nav"), region: 2, label: "主导航" },
+  { target: "#content", region: 6, label: "新闻正文" },
+]);
+```
+
+选项卡直接传入扁平配置。相同类名可一次匹配多个 tab 和 panel，并按 DOM 顺序索引配对；每个 tab 的直接父节点会自动获得 tablist 语义。行为属性写在选项节点；普通面板使用 `data-a11y-hidden` 和页面原有 CSS/事件，不使用原生 `hidden`：
+
+```js
+const tabs = AccessibilityTool.registerTabs([
+  {
+    tab: ".services-tab-hditem",
+    panel: ".services-tabcut-bdcontent",
+    region: 1,
+  },
+]);
+```
+
+同一项两侧的有效匹配数量必须相等且大于零；数量不一致时该项会被跳过，`debug: true` 时输出警告。同一选择器跨多个选项卡组件时，工具按 tab 的不同直接父节点自动拆成独立组，每组的选中状态和键盘导航互不影响。
+
+```css
+[role="tabpanel"][data-a11y-hidden] {
+  display: none;
+}
+```
+
+每个句柄可以独立、重复安全地注销；属性会恢复到注册前的不存在、空值或原值状态：
+
+```js
+regions.dispose();
+tabs.dispose();
+```
+
+API 只解析调用时已有 DOM。SPA 路由或组件框架重建节点后，需要对新节点重新调用。`close()` 不注销这些注册，`destroy()` 会自动释放所有未注销句柄。
+
+## 6. 销毁
 
 单页应用卸载整个站点壳或测试环境清理时，可调用：
 
